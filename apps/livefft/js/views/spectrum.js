@@ -34,12 +34,20 @@ export class SpectrumView {
     this.autoMaxLin = 1;        // linear mode ceiling
     this.lastNearTop = 0;
     this.lastRangeTick = 0;
+    this.snapRange = true;      // next frame jumps straight to the required range
     this.dominantPeak = null;   // {freq, db} for the header readout
     this.#configure();
 
     state.on(['fftSize', 'windowName', 'resMode'], () => this.#configure());
     state.on(['avgMode', 'expTimeConst', 'linearTarget'], () => this.#applyAveraging());
-    state.on('dB', () => this.clearPersistence());
+    state.on('dB', () => {
+      this.clearPersistence();
+      this.snapRange = true;
+    });
+    // discontinuous display changes: re-range instantly, don't glide
+    state.on(['freqMin', 'freqMax', 'freqAuto', 'freqScale', 'resMode'], () => {
+      this.snapRange = true;
+    });
     window.addEventListener('themechange', () => this.clearPersistence());
   }
 
@@ -326,6 +334,11 @@ export class SpectrumView {
     const now = performance.now();
     const dt = Math.min((now - this.lastRangeTick) / 1000, 0.1);
     this.lastRangeTick = now;
+    if (this.snapRange) {
+      this.snapRange = false;
+      this.lastNearTop = now;
+      return required;
+    }
     if (required >= current) {
       this.lastNearTop = now;
       return required;
