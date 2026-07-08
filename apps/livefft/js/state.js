@@ -8,10 +8,10 @@ export const DEFAULTS = {
   view: 'spectrum',          // spectrum | spectrogram | scope
   source: 'mic',
 
-  // spectrum analysis
+  // spectrum analysis (displayed quantity is always PSD; averaging off =
+  // live FFT, averaging on = Welch estimate)
   fftSize: 4096,
   windowName: 'hann',
-  quantity: 'amplitude',     // amplitude | rms | psd
   dB: true,
   resMode: 'standard',       // standard | multires
   avgMode: 'exponential',    // off | exponential | linear

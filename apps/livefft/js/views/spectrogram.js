@@ -62,6 +62,8 @@ export class SpectrogramView {
       }
     });
     state.on(['sgColormap', 'sgFloorDb', 'sgCeilDb'], () => this.#repaintAll());
+    // the raw dB ring survives a theme switch — repaint it in the new palette
+    window.addEventListener('themechange', () => this.#repaintAll());
   }
 
   setSampleRate(fs) {
@@ -99,7 +101,8 @@ export class SpectrogramView {
 
   #clearHistory() {
     this.rawRing.fill(-160);
-    const lut = this.lut ?? getColormap(this.state.get('sgColormap'));
+    this.#applyColormap();
+    const lut = this.lut;
     this.imgCtx.fillStyle = `rgb(${lut[0]}, ${lut[1]}, ${lut[2]})`;
     this.imgCtx.fillRect(0, 0, COLS, ROWS);
     this.writeCol = 0;
@@ -201,7 +204,9 @@ export class SpectrogramView {
   }
 
   #applyColormap() {
-    this.lut = getColormap(this.state.get('sgColormap'));
+    // light theme gets the reversed variant: silence is white, energy dark
+    const lightBg = document.documentElement.dataset.theme === 'light';
+    this.lut = getColormap(this.state.get('sgColormap'), lightBg);
   }
 
   #dbToColor(db) {

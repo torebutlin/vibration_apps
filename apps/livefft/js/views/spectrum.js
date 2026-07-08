@@ -6,11 +6,9 @@ import { MultiResSpectrum } from '../../../../shared/js/dsp/multires.js';
 import { findPeaks } from '../../../../shared/js/dsp/peaks.js';
 import { Axes, fmtHz, plotTheme } from '../../../../shared/js/plot/axes.js';
 
-const QUANTITY_LABELS = {
-  amplitude: { dB: 'dBFS (peak)', lin: 'amplitude (FS)' },
-  rms: { dB: 'dBFS (rms)', lin: 'amplitude (FS rms)' },
-  psd: { dB: 'dBFS/Hz', lin: 'PSD (FS²/Hz)' },
-};
+// The spectrum shows PSD only: with averaging off it's the live FFT
+// (instantaneous periodogram); averaging turns it into a Welch estimate.
+const QUANTITY = 'psd';
 
 export class SpectrumView {
   constructor(state) {
@@ -30,7 +28,7 @@ export class SpectrumView {
 
     state.on(['fftSize', 'windowName', 'resMode'], () => this.#configure());
     state.on(['avgMode', 'expTimeConst', 'linearTarget'], () => this.#applyAveraging());
-    state.on(['quantity', 'dB'], () => this.clearPersistence());
+    state.on('dB', () => this.clearPersistence());
     window.addEventListener('themechange', () => this.clearPersistence());
   }
 
@@ -116,7 +114,7 @@ export class SpectrumView {
   render(ctx, w, h, hover, rubberBand) {
     const s = this.state;
     const dB = s.get('dB');
-    const quantity = s.get('quantity');
+    const quantity = QUANTITY;
     const multires = s.get('resMode') === 'multires';
     const fr = this.#freqRange();
 
@@ -140,22 +138,37 @@ export class SpectrumView {
       segments = [{ binHz: this.proc.binHz, startBin: 0, values: this.display }];
     }
 
+    // Peak-hold display is computed up front so the auto range can include
+    // it — the held trace (and its labels) must never sit off-scale.
+    const peakHoldActive = s.get('peakHold') && !multires && this.proc.peakValid;
+    if (peakHoldActive) {
+      this.proc.toDisplay(this.proc.peakPower, this.peakDisplay, quantity, dB);
+    }
+
+    const rangeArrays = [...segments];
+    if (peakHoldActive) {
+      rangeArrays.push({ binHz: this.proc.binHz, startBin: 0, values: this.peakDisplay });
+    }
+    const scanPeak = (init) => {
+      let peak = init;
+      for (const seg of rangeArrays) {
+        for (let i = 0; i < seg.values.length; i++) {
+          const f = (seg.startBin + i) * seg.binHz;
+          if (f >= fr.min && f <= fr.max && seg.values[i] > peak) peak = seg.values[i];
+        }
+      }
+      return peak;
+    };
+
     // y range
     let yMin;
     let yMax;
     if (dB) {
       if (s.get('ampAuto')) {
-        let peak = -160;
-        for (const seg of segments) {
-          for (let i = 0; i < seg.values.length; i++) {
-            const f = (seg.startBin + i) * seg.binHz;
-            if (f >= fr.min && f <= fr.max && seg.values[i] > peak) peak = seg.values[i];
-          }
-        }
+        const peak = scanPeak(-160);
         const targetTop = Math.min(Math.ceil((peak + 8) / 10) * 10, 20);
         this.autoTop += 0.15 * (targetTop - this.autoTop);
-        const span = quantity === 'psd' ? 110 : 120;
-        this.autoBottom = this.autoTop - span;
+        this.autoBottom = this.autoTop - 110;
         yMin = this.autoBottom;
         yMax = this.autoTop;
       } else {
@@ -163,13 +176,7 @@ export class SpectrumView {
         yMax = s.get('ampMax');
       }
     } else {
-      let peak = 0;
-      for (const seg of segments) {
-        for (let i = 0; i < seg.values.length; i++) {
-          const f = (seg.startBin + i) * seg.binHz;
-          if (f >= fr.min && f <= fr.max && seg.values[i] > peak) peak = seg.values[i];
-        }
-      }
+      const peak = scanPeak(0);
       yMin = 0;
       yMax = peak > 0 ? peak * 1.15 : 1;
     }
@@ -177,7 +184,7 @@ export class SpectrumView {
 
     // grid + labels
     ctx.clearRect(0, 0, w, h);
-    const qLabel = QUANTITY_LABELS[quantity][dB ? 'dB' : 'lin'];
+    const qLabel = dB ? 'PSD · dBFS/Hz' : 'PSD · FS²/Hz';
     this.axes.draw(ctx, {
       xLabel: 'frequency · Hz',
       yLabel: qLabel,
@@ -208,10 +215,8 @@ export class SpectrumView {
       this.#stroke(ctx, [{ binHz: this.proc.binHz, startBin: 0, values: this.instDisplay }], th.traceGhost, 1);
     }
 
-    // peak hold trace
-    const showPeakHold = s.get('peakHold') && !multires && this.proc.peakValid;
-    if (showPeakHold) {
-      this.proc.toDisplay(this.proc.peakPower, this.peakDisplay, quantity, dB);
+    // peak hold trace (display values computed above for the auto range)
+    if (peakHoldActive) {
       this.#stroke(ctx, [{ binHz: this.proc.binHz, startBin: 0, values: this.peakDisplay }], th.tracePeak, 1);
     }
 
@@ -220,7 +225,7 @@ export class SpectrumView {
 
     legend.push({ color: th.traceMain, label: s.get('avgMode') === 'off' ? 'live' : 'average' });
     if (showGhost) legend.push({ color: th.traceGhost, label: 'live' });
-    if (showPeakHold) legend.push({ color: th.tracePeak, label: 'peak hold' });
+    if (peakHoldActive) legend.push({ color: th.tracePeak, label: 'peak hold' });
 
     // multires region boundaries
     if (multires) {

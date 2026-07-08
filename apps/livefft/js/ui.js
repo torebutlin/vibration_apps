@@ -109,7 +109,6 @@ export function initUI(state, engine, callbacks) {
   bindSelect('sel-fft', 'fftSize', (v) => parseInt(v, 10));
   bindSelect('sel-window', 'windowName');
   bindSeg('resmode', 'resMode');
-  bindSeg('quantity', 'quantity');
 
   // ---------- averaging ----------
   bindSeg('avgmode', 'avgMode');

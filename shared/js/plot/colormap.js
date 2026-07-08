@@ -47,23 +47,31 @@ const luts = new Map();
 
 /**
  * @param {string} name viridis | inferno | magma | plasma
+ * @param {boolean} reversed true for the light-background variant
+ *   (low = light, high = dark) used when the UI is in light mode
  * @returns {Uint8Array} 256*3 RGB entries
  */
-export function getColormap(name) {
-  let lut = luts.get(name);
+export function getColormap(name, reversed = false) {
+  const key = reversed ? `${name}_r` : name;
+  let lut = luts.get(key);
   if (lut) return lut;
   const c = COEFFS[name];
   if (!c) throw new Error(`Unknown colormap: ${name}`);
   lut = new Uint8Array(256 * 3);
   for (let i = 0; i < 256; i++) {
-    const t = i / 255;
+    const x = i / 255;
+    const t = reversed ? 1 - x : x;
+    // light variant: silence is pure white, blending into the (reversed)
+    // map over the first ~12% so the background matches the page
+    const whiteBlend = reversed ? Math.min(1, x / 0.12) : 1;
     for (let ch = 0; ch < 3; ch++) {
       let v = 0;
       // Horner's rule on c0 + t(c1 + t(c2 + ...))
       for (let k = 6; k >= 0; k--) v = v * t + c[k][ch];
+      v = v * whiteBlend + (1 - whiteBlend);
       lut[i * 3 + ch] = Math.max(0, Math.min(255, Math.round(v * 255)));
     }
   }
-  luts.set(name, lut);
+  luts.set(key, lut);
   return lut;
 }

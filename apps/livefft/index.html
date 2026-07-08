@@ -102,23 +102,12 @@
             <label for="res-multires">Multi-res</label>
           </nav>
         </div>
-        <div class="row" data-views="spectrum">
-          <label data-tip="Amp: peak amplitude of each sine component. RMS: amplitude ÷ √2. PSD: power per Hz — the right quantity for noise, independent of FFT length.">Quantity</label>
-          <nav class="seg">
-            <input type="radio" name="quantity" value="amplitude" id="q-amp">
-            <label for="q-amp">Amp</label>
-            <input type="radio" name="quantity" value="rms" id="q-rms">
-            <label for="q-rms">RMS</label>
-            <input type="radio" name="quantity" value="psd" id="q-psd">
-            <label for="q-psd">PSD</label>
-          </nav>
-        </div>
       </div>
 
       <div class="group" data-views="spectrum">
         <h3 class="group-title">Averaging</h3>
         <div class="row">
-          <label data-tip="Averages the power spectrum over time to steady the display. Exp: running average with a time constant. Linear: average N spectra then freeze — like a measurement.">Mode</label>
+          <label data-tip="Off: live FFT — each frame is one instantaneous spectrum. Exp: running average with a time constant. Linear: average N spectra then freeze — a Welch PSD measurement.">Mode</label>
           <nav class="seg">
             <input type="radio" name="avgmode" value="off" id="avg-off">
             <label for="avg-off">Off</label>
