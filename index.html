@@ -7,6 +7,7 @@
   <meta name="description" content="Interactive web apps and demos for vibration teaching — spectrum analysis, waves, and more. Run in the browser, install on any device.">
   <meta name="theme-color" content="#07090f">
   <link rel="icon" href="apps/livefft/icons/icon.svg" type="image/svg+xml">
+  <script>document.documentElement.dataset.theme = localStorage.getItem('vibapps-theme') || 'dark';</script>
   <link rel="stylesheet" href="shared/css/theme.css">
   <style>
     body {
@@ -124,6 +125,18 @@
   </style>
 </head>
 <body>
+  <button id="btn-theme" class="btn" style="position: fixed; top: 1rem; right: 1rem; z-index: 10;">☀</button>
+  <script>
+    const btnTheme = document.getElementById('btn-theme');
+    const glyph = () => { btnTheme.textContent = document.documentElement.dataset.theme === 'dark' ? '☀︎' : '☽︎'; };
+    btnTheme.addEventListener('click', () => {
+      const t = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+      document.documentElement.dataset.theme = t;
+      try { localStorage.setItem('vibapps-theme', t); } catch {}
+      glyph();
+    });
+    glyph();
+  </script>
   <div class="wrap">
     <header class="hero">
       <h1>VIBRATION APPS<span class="dot">.</span></h1>

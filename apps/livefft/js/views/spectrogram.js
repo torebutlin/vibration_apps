@@ -12,7 +12,7 @@
 import { rfftMagSq } from '../../../../shared/js/dsp/fft.js';
 import { getWindow } from '../../../../shared/js/dsp/windows.js';
 import { getColormap } from '../../../../shared/js/plot/colormap.js';
-import { Axes, fmtHz } from '../../../../shared/js/plot/axes.js';
+import { Axes, fmtHz, plotTheme } from '../../../../shared/js/plot/axes.js';
 
 const COLS = 1024;
 const ROWS = 512;
@@ -49,10 +49,18 @@ export class SpectrogramView {
 
     this.#rebuild();
     state.on(
-      ['sgMode', 'sgSpan', 'fftSize', 'windowName', 'freqScale', 'freqMin', 'freqMax', 'freqAuto',
-        'cwtFMin', 'cwtFMax', 'cwtBinsPerOctave', 'cwtOmega0'],
+      ['sgMode', 'sgSpan', 'fftSize', 'windowName', 'cwtFMin', 'cwtFMax', 'cwtBinsPerOctave', 'cwtOmega0'],
       () => this.#rebuild()
     );
+    // axis changes don't need a worker restart in CWT mode — just remap rows
+    state.on(['freqScale', 'freqMin', 'freqMax', 'freqAuto'], () => {
+      if (this.isCwt && this.workerReady) {
+        this.#clearHistory();
+        this.#buildCwtRowMap();
+      } else {
+        this.#rebuild();
+      }
+    });
     state.on(['sgColormap', 'sgFloorDb', 'sgCeilDb'], () => this.#repaintAll());
   }
 
@@ -67,13 +75,14 @@ export class SpectrogramView {
     return this.state.get('sgMode') === 'cwt';
   }
 
-  /** Display frequency range: manual/auto for STFT, scale range for CWT. */
+  /** Display frequency range: manual/auto for STFT, scale range for CWT
+   *  (which respects the lin/log toggle for display). */
   #freqRange() {
     const s = this.state;
-    if (this.isCwt) {
-      return { min: s.get('cwtFMin'), max: Math.min(s.get('cwtFMax'), this.sampleRate / 2), log: true };
-    }
     const log = s.get('freqScale') === 'log';
+    if (this.isCwt) {
+      return { min: s.get('cwtFMin'), max: Math.min(s.get('cwtFMax'), this.sampleRate / 2), log };
+    }
     if (s.get('freqAuto')) return { min: log ? 20 : 0, max: this.sampleRate / 2, log };
     return {
       min: log ? Math.max(s.get('freqMin'), 1) : s.get('freqMin'),
@@ -82,16 +91,44 @@ export class SpectrogramView {
     };
   }
 
+  /** Frequency at display row r for the current range (row 0 = top = fmax). */
+  #rowFreq(r, fr) {
+    const t = 1 - r / (ROWS - 1);
+    return fr.log ? fr.min * Math.pow(fr.max / fr.min, t) : fr.min + t * (fr.max - fr.min);
+  }
+
+  #clearHistory() {
+    this.rawRing.fill(-160);
+    const lut = this.lut ?? getColormap(this.state.get('sgColormap'));
+    this.imgCtx.fillStyle = `rgb(${lut[0]}, ${lut[1]}, ${lut[2]})`;
+    this.imgCtx.fillRect(0, 0, COLS, ROWS);
+    this.writeCol = 0;
+  }
+
+  #buildCwtRowMap() {
+    const fr = this.#freqRange();
+    const freqs = this.cwtFreqs;
+    const nS = freqs.length;
+    const logMin = Math.log(freqs[0]);
+    const logMax = Math.log(freqs[nS - 1]);
+    for (let r = 0; r < ROWS; r++) {
+      const f = Math.min(Math.max(this.#rowFreq(r, fr), freqs[0]), freqs[nS - 1]);
+      this.rowMap[r] = Math.min(
+        nS - 1,
+        Math.max(0, Math.round(((Math.log(f) - logMin) / (logMax - logMin)) * (nS - 1)))
+      );
+    }
+  }
+
   #rebuild() {
     const s = this.state;
     const fs = this.sampleRate;
     this.colPeriodSamples = (s.get('sgSpan') * fs) / COLS;
     this.sinceCol = 0;
     this.lastTotal = 0;
-    this.rawRing.fill(-160);
-    this.imgCtx.fillStyle = '#000';
-    this.imgCtx.fillRect(0, 0, COLS, ROWS);
-    this.writeCol = 0;
+    this.newestColTotal = 0;
+    this.curTotal = 0;
+    this.#clearHistory();
 
     const fr = this.#freqRange();
     this.rowMap = new Float32Array(ROWS);
@@ -107,9 +144,7 @@ export class SpectrogramView {
       if (this.scratch.length < n) this.scratch = new Float32Array(n);
       const binHz = fs / n;
       for (let r = 0; r < ROWS; r++) {
-        const t = 1 - r / (ROWS - 1); // row 0 = top = fmax
-        const f = fr.log ? fr.min * Math.pow(fr.max / fr.min, 1 - r / (ROWS - 1)) : fr.min + t * (fr.max - fr.min);
-        this.rowMap[r] = Math.min(Math.round(f / binHz), n / 2);
+        this.rowMap[r] = Math.min(Math.round(this.#rowFreq(r, fr) / binHz), n / 2);
       }
       if (this.worker) {
         this.worker.terminate();
@@ -157,14 +192,7 @@ export class SpectrogramView {
         this.cwtDecRate = msg.decRate;
         this.cwtMaxCols = msg.maxCols; // decimated samples usable per call
         this.lastDecSent = 0;
-        // row -> scale index (freqs are log-spaced, display log too)
-        const nS = msg.freqs.length;
-        const logMin = Math.log(msg.freqs[0]);
-        const logMax = Math.log(msg.freqs[nS - 1]);
-        for (let r = 0; r < ROWS; r++) {
-          const lf = logMax - (r / (ROWS - 1)) * (logMax - logMin);
-          this.rowMap[r] = Math.min(nS - 1, Math.max(0, Math.round(((lf - logMin) / (logMax - logMin)) * (nS - 1))));
-        }
+        this.#buildCwtRowMap();
       } else if (msg.type === 'result') {
         this.workerBusy = false;
         this.#writeCwtColumns(msg.data, msg.nCols);
@@ -222,9 +250,14 @@ export class SpectrogramView {
     }
   }
 
+  /** Wavelet latency in decimated samples. */
+  latencyDecApprox() {
+    return Math.round(this.cwtLatency * this.cwtDecRate);
+  }
+
   #writeCwtColumns(data, nCols) {
     // data: Float32Array nScales x nCols (row-major by scale), amplitudes
-    const nS = this.cwtFreqs.length;
+    if (this.pendingEndTotal) this.newestColTotal = this.pendingEndTotal;
     for (let c = 0; c < nCols; c++) {
       for (let r = 0; r < ROWS; r++) {
         const j = this.rowMap[r];
@@ -237,8 +270,10 @@ export class SpectrogramView {
 
   tick(engine, _dt) {
     const total = engine.totalSamples;
+    this.curTotal = total; // render uses this for smooth time-based scrolling
     if (this.lastTotal === 0) {
       this.lastTotal = total;
+      this.newestColTotal = total;
       return;
     }
     const fresh = total - this.lastTotal;
@@ -250,6 +285,7 @@ export class SpectrogramView {
       let toEmit = Math.floor(this.sinceCol / this.colPeriodSamples);
       if (toEmit <= 0) return;
       this.sinceCol -= toEmit * this.colPeriodSamples;
+      this.newestColTotal = total - this.sinceCol;
       // catch-up bound: after a stall the current spectrum is duplicated
       // rather than dropping display time entirely
       toEmit = Math.min(toEmit, 64);
@@ -283,6 +319,9 @@ export class SpectrogramView {
       // advance by the full backlog: anything beyond nCols is dropped
       // (display resumes at real time after a stall)
       this.lastDecSent = nowDec - (elapsed % decPerCol);
+      // full-rate time of the last requested column (incl. wavelet latency)
+      this.pendingEndTotal =
+        ((this.lastDecSent - this.latencyDecApprox()) * this.sampleRate) / this.cwtDecRate;
       this.workerBusy = true;
       this.worker.postMessage(
         { type: 'analyze', samples: buf, nCols, colStride: decPerCol },
@@ -303,19 +342,35 @@ export class SpectrogramView {
     ctx.clearRect(0, 0, w, h);
     const r = this.axes.rect;
 
-    // heatmap: ring buffer as two slices; newest column at right edge
+    // Smooth scrolling: shift the image left by the audio time elapsed
+    // since the newest written column, so the display glides continuously
+    // even when columns arrive in batches (CWT worker results).
+    let offsetPx = 0;
+    if (this.newestColTotal > 0 && this.curTotal > this.newestColTotal) {
+      const pendingCols = (this.curTotal - this.newestColTotal) / this.colPeriodSamples;
+      offsetPx = Math.min((pendingCols / COLS) * r.w, r.w * 0.3);
+    }
+
+    // heatmap: ring buffer as two slices; newest column at right edge - offset
     ctx.save();
     ctx.beginPath();
     ctx.rect(r.x, r.y, r.w, r.h);
     ctx.clip();
     ctx.imageSmoothingEnabled = true;
+    const x0 = r.x - offsetPx;
     const wNew = this.writeCol;            // columns 0..writeCol-1 are newest chunk's tail
     const wOld = COLS - wNew;
     if (wOld > 0) {
-      ctx.drawImage(this.img, wNew, 0, wOld, ROWS, r.x, r.y, (wOld / COLS) * r.w, r.h);
+      ctx.drawImage(this.img, wNew, 0, wOld, ROWS, x0, r.y, (wOld / COLS) * r.w, r.h);
     }
     if (wNew > 0) {
-      ctx.drawImage(this.img, 0, 0, wNew, ROWS, r.x + (wOld / COLS) * r.w, r.y, (wNew / COLS) * r.w, r.h);
+      ctx.drawImage(this.img, 0, 0, wNew, ROWS, x0 + (wOld / COLS) * r.w, r.y, (wNew / COLS) * r.w, r.h);
+    }
+    if (offsetPx > 0) {
+      // not-yet-computed strip at the right: paint as silence, not page bg
+      const lut = this.lut;
+      ctx.fillStyle = `rgb(${lut[0]}, ${lut[1]}, ${lut[2]})`;
+      ctx.fillRect(r.x + r.w - offsetPx, r.y, offsetPx, r.h);
     }
     ctx.restore();
 
@@ -329,8 +384,9 @@ export class SpectrogramView {
     });
 
     // colorbar hint + latency note
+    const th = plotTheme();
     ctx.font = '500 10px "JetBrains Mono", monospace';
-    ctx.fillStyle = '#56617a';
+    ctx.fillStyle = th.title;
     ctx.textAlign = 'right';
     ctx.textBaseline = 'top';
     const range = `${s.get('sgFloorDb')}…${s.get('sgCeilDb')} dBFS`;
@@ -344,15 +400,15 @@ export class SpectrogramView {
       const time = this.axes.pxToX(hover.x);
       const freqTxt = freq >= 1000 ? `${(freq / 1000).toFixed(2)} kHz` : `${freq.toFixed(0)} Hz`;
       const text = `${time.toFixed(2)} s  ${freqTxt}`;
-      ctx.font = '500 11px "JetBrains Mono", monospace';
+      ctx.font = th.tagFont;
       const tw = ctx.measureText(text).width + 14;
       const bx = Math.min(hover.x + 12, r.x + r.w - tw - 4);
       const by = Math.max(hover.y - 30, r.y + 4);
-      ctx.fillStyle = 'rgba(13, 17, 25, 0.85)';
+      ctx.fillStyle = th.tagBg;
       ctx.fillRect(bx, by, tw, 20);
-      ctx.strokeStyle = 'rgba(158, 178, 216, 0.3)';
+      ctx.strokeStyle = th.tagBorder;
       ctx.strokeRect(bx + 0.5, by + 0.5, tw - 1, 19);
-      ctx.fillStyle = '#d9e2f4';
+      ctx.fillStyle = th.text;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
       ctx.fillText(text, bx + 7, by + 10);

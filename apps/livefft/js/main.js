@@ -131,6 +131,25 @@ engine.onOverload = () => {
   lastClip = performance.now();
 };
 
+// ---------- theme ----------
+
+const btnTheme = document.getElementById('btn-theme');
+
+// ︎ forces text (not emoji) rendering of the sun/moon glyphs
+const THEME_GLYPH = { dark: '☀︎', light: '☽︎' };
+
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  try { localStorage.setItem('vibapps-theme', theme); } catch { /* private mode */ }
+  btnTheme.textContent = THEME_GLYPH[theme];
+  window.dispatchEvent(new Event('themechange'));
+}
+
+btnTheme.textContent = THEME_GLYPH[document.documentElement.dataset.theme || 'dark'];
+btnTheme.addEventListener('click', () => {
+  applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
+});
+
 const ui = initUI(state, engine, {
   onSourceChange() {
     if (started && engine.running) startEngine(); // hot-swap source
@@ -185,7 +204,8 @@ function updateReadouts(now) {
         ? `CWT ${state.get('cwtBinsPerOctave')}/oct`
         : `${(engine.sampleRate / state.get('fftSize')).toFixed(1)} Hz`;
     } else {
-      roRes.textContent = `${(state.get('scopeSpan') * 1000).toFixed(0)} ms`;
+      const span = state.get('scopeSpan');
+      roRes.textContent = span < 1 ? `${(span * 1000).toFixed(0)} ms` : `${span} s`;
     }
   }
   lampClip.classList.toggle('on', now - lastClip < 600);

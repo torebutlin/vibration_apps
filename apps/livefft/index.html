@@ -9,6 +9,7 @@
   <link rel="manifest" href="app.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <script>document.documentElement.dataset.theme = localStorage.getItem('vibapps-theme') || 'dark';</script>
   <link rel="stylesheet" href="../../shared/css/theme.css">
   <link rel="stylesheet" href="css/app.css">
 </head>
@@ -31,6 +32,7 @@
 
       <div id="topbar-right">
         <span class="lamp" id="lamp-clip">CLIP</span>
+        <button class="btn" id="btn-theme" aria-label="Toggle light/dark theme" title="Light / dark theme">☀</button>
         <button class="btn primary" id="btn-run" title="Space bar toggles run/pause">▶ Start</button>
         <button class="btn" id="btn-panel" aria-label="Toggle controls">☰</button>
       </div>
@@ -66,23 +68,23 @@
           <select id="sel-source"></select>
         </div>
         <div class="row" id="row-monitor" hidden>
-          <label for="rng-monitor">Listen</label>
+          <label for="rng-monitor" data-tip="Play the demo signal through the speakers.">Listen</label>
           <input type="range" id="rng-monitor" min="0" max="0.5" step="0.01" style="width: 9rem;">
         </div>
       </div>
 
-      <div class="group" data-views="spectrum spectrogram">
+      <div class="group" data-views="spectrum spectrogram" id="grp-analysis">
         <h3 class="group-title">Analysis</h3>
-        <div class="row">
-          <label for="sel-fft">FFT size</label>
+        <div class="row" id="row-fft">
+          <label for="sel-fft" data-tip="Samples per FFT. Longer = finer frequency resolution (Δf = fs / N) but slower response to change. Not used by the wavelet spectrogram.">FFT size</label>
           <select id="sel-fft">
             <option>512</option><option>1024</option><option>2048</option>
             <option>4096</option><option>8192</option><option>16384</option>
             <option>32768</option>
           </select>
         </div>
-        <div class="row">
-          <label for="sel-window">Window</label>
+        <div class="row" id="row-window">
+          <label for="sel-window" data-tip="Taper applied before the FFT to control spectral leakage. Hann is the standard choice; flat-top gives the most accurate peak amplitudes; rectangular shows leakage at its worst.">Window</label>
           <select id="sel-window">
             <option value="hann">Hann</option>
             <option value="rectangular">Rectangular</option>
@@ -92,23 +94,23 @@
           </select>
         </div>
         <div class="row" data-views="spectrum">
-          <label>Resolution</label>
+          <label data-tip="Fixed: one FFT length everywhere. Multi-res: stitches three FFT lengths so frequencies below fs/32 get 16× finer resolution (at the cost of slower response there).">Resolution</label>
           <nav class="seg">
             <input type="radio" name="resmode" value="standard" id="res-standard">
-            <label for="res-standard" title="Single FFT length">Fixed</label>
+            <label for="res-standard">Fixed</label>
             <input type="radio" name="resmode" value="multires" id="res-multires">
-            <label for="res-multires" title="Longer windows at low frequency (16× finer bins below fs/32)">Multi-res</label>
+            <label for="res-multires">Multi-res</label>
           </nav>
         </div>
         <div class="row" data-views="spectrum">
-          <label>Quantity</label>
+          <label data-tip="Amp: peak amplitude of each sine component. RMS: amplitude ÷ √2. PSD: power per Hz — the right quantity for noise, independent of FFT length.">Quantity</label>
           <nav class="seg">
             <input type="radio" name="quantity" value="amplitude" id="q-amp">
-            <label for="q-amp" title="Peak amplitude of each sine component">Amp</label>
+            <label for="q-amp">Amp</label>
             <input type="radio" name="quantity" value="rms" id="q-rms">
-            <label for="q-rms" title="RMS amplitude">RMS</label>
+            <label for="q-rms">RMS</label>
             <input type="radio" name="quantity" value="psd" id="q-psd">
-            <label for="q-psd" title="Power spectral density (per Hz)">PSD</label>
+            <label for="q-psd">PSD</label>
           </nav>
         </div>
       </div>
@@ -116,23 +118,23 @@
       <div class="group" data-views="spectrum">
         <h3 class="group-title">Averaging</h3>
         <div class="row">
-          <label>Mode</label>
+          <label data-tip="Averages the power spectrum over time to steady the display. Exp: running average with a time constant. Linear: average N spectra then freeze — like a measurement.">Mode</label>
           <nav class="seg">
             <input type="radio" name="avgmode" value="off" id="avg-off">
             <label for="avg-off">Off</label>
             <input type="radio" name="avgmode" value="exponential" id="avg-exp">
-            <label for="avg-exp" title="Running exponential average">Exp</label>
+            <label for="avg-exp">Exp</label>
             <input type="radio" name="avgmode" value="linear" id="avg-lin">
-            <label for="avg-lin" title="Average N spectra then hold">Linear</label>
+            <label for="avg-lin">Linear</label>
           </nav>
         </div>
         <div class="row" id="row-tau">
-          <label for="rng-tau">Time const</label>
+          <label for="rng-tau" data-tip="Averaging time constant: larger = smoother but slower to follow changes.">Time const</label>
           <input type="range" id="rng-tau" min="-1.3" max="1" step="0.05" style="width: 6rem; flex: 1;">
           <span class="readout" id="ro-tau" style="min-width: 3.6rem; text-align: right;">0.5 s</span>
         </div>
         <div class="row" id="row-linN" hidden>
-          <label for="sel-linN">Averages</label>
+          <label for="sel-linN" data-tip="Number of spectra averaged before the display freezes. Restart begins a fresh measurement.">Averages</label>
           <select id="sel-linN">
             <option>4</option><option>8</option><option>16</option>
             <option>32</option><option>64</option><option>128</option>
@@ -140,7 +142,7 @@
           <button class="btn small" id="btn-avg-restart">Restart</button>
         </div>
         <div class="row">
-          <label for="sw-peakhold">Peak hold</label>
+          <label for="sw-peakhold" data-tip="Keeps the maximum of every frequency bin since the last reset — shown as the second (amber) trace. Good for capturing transients.">Peak hold</label>
           <span style="display:flex; align-items:center; gap:0.5rem;">
             <span class="switch"><input type="checkbox" id="sw-peakhold"><span class="track"></span></span>
             <button class="btn small" id="btn-peakreset">Reset</button>
@@ -151,15 +153,15 @@
       <div class="group" data-views="spectrum">
         <h3 class="group-title">Display</h3>
         <div class="row">
-          <label for="sw-db">dB scale</label>
+          <label for="sw-db" data-tip="Logarithmic amplitude in dB relative to full scale (dBFS). Off = linear amplitude.">dB scale</label>
           <span class="switch"><input type="checkbox" id="sw-db"><span class="track"></span></span>
         </div>
         <div class="row">
-          <label for="sw-persist" title="Fading trace history, like a phosphor screen">Persistence</label>
+          <label for="sw-persist" data-tip="Fading history of the trace, like a phosphor oscilloscope screen — shows how the spectrum has been moving.">Persistence</label>
           <span class="switch"><input type="checkbox" id="sw-persist"><span class="track"></span></span>
         </div>
         <div class="row">
-          <label for="sel-peaklabels">Peak labels</label>
+          <label for="sel-peaklabels" data-tip="How many spectral peaks get frequency labels.">Peak labels</label>
           <select id="sel-peaklabels">
             <option value="0">Off</option><option value="2">2</option>
             <option value="4">4</option><option value="6">6</option><option value="8">8</option>
@@ -170,7 +172,7 @@
       <div class="group" data-views="spectrum spectrogram">
         <h3 class="group-title">Frequency axis</h3>
         <div class="row">
-          <label>Scale</label>
+          <label data-tip="Log spreads the octaves evenly — each doubling of frequency gets equal width. Natural for musical and structural work.">Scale</label>
           <nav class="seg">
             <input type="radio" name="fscale" value="linear" id="fs-lin">
             <label for="fs-lin">Linear</label>
@@ -179,7 +181,7 @@
           </nav>
         </div>
         <div class="row">
-          <label for="sel-frange">Range</label>
+          <label for="sel-frange" data-tip="Displayed frequency range. You can also drag on the plot to zoom; double-click to reset.">Range</label>
           <select id="sel-frange">
             <option value="auto">Full</option>
             <option value="500">to 500 Hz</option>
@@ -195,11 +197,11 @@
       <div class="group" data-views="spectrum">
         <h3 class="group-title">Amplitude axis</h3>
         <div class="row">
-          <label for="sw-ampauto">Auto range</label>
+          <label for="sw-ampauto" data-tip="Follows the signal level automatically. Turn off to set a fixed dB range.">Auto range</label>
           <span class="switch"><input type="checkbox" id="sw-ampauto"><span class="track"></span></span>
         </div>
         <div class="row" id="row-amprange" hidden>
-          <label>dB min / max</label>
+          <label data-tip="Fixed vertical axis limits in dBFS.">dB min / max</label>
           <span style="display:flex; gap:0.4rem;">
             <input type="number" id="num-ampmin" step="5" style="width:4.4rem;">
             <input type="number" id="num-ampmax" step="5" style="width:4.4rem;">
@@ -210,16 +212,16 @@
       <div class="group" data-views="spectrogram">
         <h3 class="group-title">Spectrogram</h3>
         <div class="row">
-          <label>Method</label>
+          <label data-tip="STFT: fixed FFT resolution everywhere. Wavelet (Morlet CWT): resolution scales with frequency — sharp in time at high frequency, sharp in frequency at low frequency (constant Q).">Method</label>
           <nav class="seg">
             <input type="radio" name="sgmode" value="stft" id="sg-stft">
-            <label for="sg-stft" title="Short-time FFT: fixed resolution">STFT</label>
+            <label for="sg-stft">STFT</label>
             <input type="radio" name="sgmode" value="cwt" id="sg-cwt">
-            <label for="sg-cwt" title="Morlet wavelet: multi-resolution (constant Q)">Wavelet</label>
+            <label for="sg-cwt">Wavelet</label>
           </nav>
         </div>
         <div class="row">
-          <label for="sel-sgspan">Time span</label>
+          <label for="sel-sgspan" data-tip="How much history the display shows.">Time span</label>
           <select id="sel-sgspan">
             <option value="5">5 s</option><option value="10">10 s</option>
             <option value="20">20 s</option><option value="60">60 s</option>
@@ -235,31 +237,31 @@
           </select>
         </div>
         <div class="row">
-          <label for="rng-sgfloor">Floor</label>
+          <label for="rng-sgfloor" data-tip="Level (dBFS) mapped to the darkest colour — everything quieter is black.">Floor</label>
           <input type="range" id="rng-sgfloor" min="-140" max="-40" step="5" style="width: 7rem;">
           <span class="readout" id="ro-sgfloor">-95</span>
         </div>
         <div class="row">
-          <label for="rng-sgceil">Ceiling</label>
+          <label for="rng-sgceil" data-tip="Level (dBFS) mapped to the brightest colour — everything louder saturates.">Ceiling</label>
           <input type="range" id="rng-sgceil" min="-60" max="0" step="5" style="width: 7rem;">
           <span class="readout" id="ro-sgceil">-15</span>
         </div>
         <div id="cwt-rows" hidden>
           <div class="row">
-            <label for="num-cwtfmin">f min / max</label>
+            <label for="num-cwtfmin" data-tip="Frequency range the wavelet analysis covers. Lower f min needs longer wavelets, so the display lags a little more.">f min / max</label>
             <span style="display:flex; gap:0.4rem;">
               <input type="number" id="num-cwtfmin" min="5" step="5" style="width:4.4rem;">
               <input type="number" id="num-cwtfmax" min="100" step="100" style="width:4.4rem;">
             </span>
           </div>
           <div class="row">
-            <label for="sel-cwtbpo">Bins / octave</label>
+            <label for="sel-cwtbpo" data-tip="Wavelet centre frequencies per octave — the vertical resolution of the scaleogram. More = smoother but slower to compute.">Bins / octave</label>
             <select id="sel-cwtbpo">
               <option>8</option><option>12</option><option>16</option><option>24</option>
             </select>
           </div>
           <div class="row">
-            <label title="Morlet ω₀: higher = better frequency resolution, worse time resolution">Wavelet Q</label>
+            <label data-tip="Wavelet Q (Morlet ω₀ = 6 / 12 / 24). Higher Q: each wavelet spans more cycles, giving narrower frequency bands but blurrier timing and a longer display delay.">Wavelet Q</label>
             <nav class="seg">
               <input type="radio" name="cwtq" value="6" id="cwtq-6">
               <label for="cwtq-6">Low</label>
@@ -275,16 +277,17 @@
       <div class="group" data-views="scope">
         <h3 class="group-title">Scope</h3>
         <div class="row">
-          <label for="sel-scopespan">Time span</label>
+          <label for="sel-scopespan" data-tip="How much of the waveform the display shows.">Time span</label>
           <select id="sel-scopespan">
             <option value="0.005">5 ms</option><option value="0.01">10 ms</option>
             <option value="0.02">20 ms</option><option value="0.05">50 ms</option>
             <option value="0.1">100 ms</option><option value="0.2">200 ms</option>
-            <option value="0.5">500 ms</option>
+            <option value="0.5">500 ms</option><option value="1">1 s</option>
+            <option value="2">2 s</option><option value="5">5 s</option>
           </select>
         </div>
         <div class="row">
-          <label for="sw-trigger">Trigger</label>
+          <label for="sw-trigger" data-tip="Aligns the trace to a rising zero-crossing so periodic signals hold still instead of drifting.">Trigger</label>
           <span class="switch"><input type="checkbox" id="sw-trigger"><span class="track"></span></span>
         </div>
       </div>

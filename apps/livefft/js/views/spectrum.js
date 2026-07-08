@@ -4,12 +4,7 @@
 import { SpectrumProcessor } from '../../../../shared/js/dsp/spectrum.js';
 import { MultiResSpectrum } from '../../../../shared/js/dsp/multires.js';
 import { findPeaks } from '../../../../shared/js/dsp/peaks.js';
-import { Axes, fmtHz } from '../../../../shared/js/plot/axes.js';
-
-const TRACE = '#3fe8d2';
-const TRACE_GHOST = 'rgba(63, 232, 210, 0.28)';
-const PEAK = '#ffb454';
-const LABEL_BG = 'rgba(13, 17, 25, 0.85)';
+import { Axes, fmtHz, plotTheme } from '../../../../shared/js/plot/axes.js';
 
 const QUANTITY_LABELS = {
   amplitude: { dB: 'dBFS (peak)', lin: 'amplitude (FS)' },
@@ -36,6 +31,7 @@ export class SpectrumView {
     state.on(['fftSize', 'windowName', 'resMode'], () => this.#configure());
     state.on(['avgMode', 'expTimeConst', 'linearTarget'], () => this.#applyAveraging());
     state.on(['quantity', 'dB'], () => this.clearPersistence());
+    window.addEventListener('themechange', () => this.clearPersistence());
   }
 
   #configure() {
@@ -190,6 +186,8 @@ export class SpectrumView {
 
     const r = this.axes.rect;
 
+    const th = plotTheme();
+
     // clip to plot area for traces
     ctx.save();
     ctx.beginPath();
@@ -198,27 +196,35 @@ export class SpectrumView {
 
     // persistence layer
     if (s.get('persistence') && !multires) {
-      this.#renderPersistence(ctx, w, h, segments[0]);
+      this.#renderPersistence(ctx, w, h, segments[0], th);
     }
 
+    const legend = [];
+
     // instantaneous ghost trace (standard mode, averaging on)
-    if (!multires && s.get('avgMode') !== 'off') {
+    const showGhost = !multires && s.get('avgMode') !== 'off';
+    if (showGhost) {
       this.proc.toDisplay(this.proc.power, this.instDisplay, quantity, dB);
-      this.#stroke(ctx, [{ binHz: this.proc.binHz, startBin: 0, values: this.instDisplay }], TRACE_GHOST, 1);
+      this.#stroke(ctx, [{ binHz: this.proc.binHz, startBin: 0, values: this.instDisplay }], th.traceGhost, 1);
     }
 
     // peak hold trace
-    if (s.get('peakHold') && !multires && this.proc.peakValid) {
+    const showPeakHold = s.get('peakHold') && !multires && this.proc.peakValid;
+    if (showPeakHold) {
       this.proc.toDisplay(this.proc.peakPower, this.peakDisplay, quantity, dB);
-      this.#stroke(ctx, [{ binHz: this.proc.binHz, startBin: 0, values: this.peakDisplay }], PEAK, 1);
+      this.#stroke(ctx, [{ binHz: this.proc.binHz, startBin: 0, values: this.peakDisplay }], th.tracePeak, 1);
     }
 
     // main trace
-    this.#stroke(ctx, segments, TRACE, 1.6);
+    this.#stroke(ctx, segments, th.traceMain, 1.6);
+
+    legend.push({ color: th.traceMain, label: s.get('avgMode') === 'off' ? 'live' : 'average' });
+    if (showGhost) legend.push({ color: th.traceGhost, label: 'live' });
+    if (showPeakHold) legend.push({ color: th.tracePeak, label: 'peak hold' });
 
     // multires region boundaries
     if (multires) {
-      ctx.strokeStyle = 'rgba(158, 178, 216, 0.25)';
+      ctx.strokeStyle = th.crosshair;
       ctx.setLineDash([3, 5]);
       for (const seg of segments) {
         if (seg.fLow > 0 && seg.fLow > fr.min && seg.fLow < fr.max) {
@@ -234,10 +240,13 @@ export class SpectrumView {
 
     ctx.restore();
 
+    // trace legend (top-left) — identifies average / live / peak hold
+    if (legend.length > 1 || s.get('peakHold')) this.#drawLegend(ctx, legend, th);
+
     // peak labels (drawn over frame edge allowed)
     this.dominantPeak = null;
     const nLabels = s.get('peakLabels');
-    if (nLabels > 0) this.#drawPeakLabels(ctx, segments, dB, nLabels);
+    if (nLabels > 0) this.#drawPeakLabels(ctx, segments, dB, nLabels, th);
 
     // rubber band
     if (rubberBand) {
@@ -251,11 +260,33 @@ export class SpectrumView {
 
     // crosshair
     if (hover && this.axes.inRect(hover.x, hover.y)) {
-      this.#drawCrosshair(ctx, hover, segments, dB);
+      this.#drawCrosshair(ctx, hover, segments, dB, th);
     }
   }
 
-  #renderPersistence(ctx, w, h, seg) {
+  #drawLegend(ctx, entries, th) {
+    const r = this.axes.rect;
+    ctx.save();
+    ctx.font = '500 10px "JetBrains Mono", monospace';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    let x = r.x + 12;
+    const y = r.y + 12;
+    for (const e of entries) {
+      ctx.strokeStyle = e.color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + 14, y);
+      ctx.stroke();
+      ctx.fillStyle = th.label;
+      ctx.fillText(e.label, x + 19, y + 0.5);
+      x += 19 + ctx.measureText(e.label).width + 16;
+    }
+    ctx.restore();
+  }
+
+  #renderPersistence(ctx, w, h, seg, th) {
     if (!this.persistCanvas || this.persistCanvas.width !== ctx.canvas.width || this.persistCanvas.height !== ctx.canvas.height) {
       this.persistCanvas = document.createElement('canvas');
       this.persistCanvas.width = ctx.canvas.width;
@@ -268,9 +299,9 @@ export class SpectrumView {
     pc.globalCompositeOperation = 'destination-out';
     pc.fillStyle = 'rgba(0, 0, 0, 0.045)';
     pc.fillRect(0, 0, w, h);
-    // add current trace
-    pc.globalCompositeOperation = 'lighter';
-    pc.strokeStyle = 'rgba(63, 232, 210, 0.05)';
+    // add current trace ('lighter' glows on dark; plain alpha build-up on light)
+    pc.globalCompositeOperation = th.persistComp;
+    pc.strokeStyle = th.persistColor;
     pc.lineWidth = 1.4;
     this.#tracePath(pc, seg);
     pc.stroke();
@@ -309,7 +340,7 @@ export class SpectrumView {
     }
   }
 
-  #drawPeakLabels(ctx, segments, dB, nLabels) {
+  #drawPeakLabels(ctx, segments, dB, nLabels, th) {
     // collect candidate peaks across segments (multires: per segment)
     const all = [];
     for (const seg of segments) {
@@ -345,29 +376,33 @@ export class SpectrumView {
       stagger = px - lastLabelX < tw + 6 ? (stagger + 1) % 3 : 0;
       const ly = Math.max(py - 12 - stagger * 15, this.axes.rect.y + 14);
       // marker
-      ctx.fillStyle = PEAK;
+      ctx.fillStyle = th.tracePeak;
       ctx.beginPath();
       ctx.arc(px, py, 2.5, 0, Math.PI * 2);
       ctx.fill();
       // leader
-      ctx.strokeStyle = 'rgba(255, 180, 84, 0.35)';
+      ctx.globalAlpha = 0.4;
+      ctx.strokeStyle = th.tracePeak;
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(px, py - 4);
       ctx.lineTo(px, ly - 11);
       ctx.stroke();
       // tag
-      ctx.fillStyle = LABEL_BG;
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = th.tagBg;
       ctx.fillRect(px - tw / 2, ly - 24, tw, 15);
-      ctx.strokeStyle = 'rgba(255, 180, 84, 0.4)';
+      ctx.globalAlpha = 0.5;
+      ctx.strokeStyle = th.tracePeak;
       ctx.strokeRect(px - tw / 2 + 0.5, ly - 23.5, tw - 1, 14);
-      ctx.fillStyle = PEAK;
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = th.tracePeak;
       ctx.fillText(label, px, ly - 11);
       lastLabelX = px;
     }
   }
 
-  #drawCrosshair(ctx, hover, segments, dB) {
+  #drawCrosshair(ctx, hover, segments, dB, th) {
     const ax = this.axes;
     const r = ax.rect;
     const freq = ax.pxToX(hover.x);
@@ -383,7 +418,7 @@ export class SpectrumView {
     }
 
     ctx.save();
-    ctx.strokeStyle = 'rgba(217, 226, 244, 0.25)';
+    ctx.strokeStyle = th.crosshair;
     ctx.lineWidth = 1;
     ctx.setLineDash([4, 4]);
     ctx.beginPath();
@@ -397,7 +432,7 @@ export class SpectrumView {
       ctx.lineTo(r.x + r.w, py + 0.5);
       ctx.stroke();
       ctx.setLineDash([]);
-      ctx.fillStyle = TRACE;
+      ctx.fillStyle = th.traceMain;
       ctx.beginPath();
       ctx.arc(hover.x, py, 3, 0, Math.PI * 2);
       ctx.fill();
@@ -408,15 +443,15 @@ export class SpectrumView {
     const freqTxt = freq >= 1000 ? `${(freq / 1000).toFixed(3)} kHz` : `${freq.toFixed(1)} Hz`;
     const valTxt = value === null ? '' : dB ? `${value.toFixed(1)} dB` : value.toExponential(2);
     const text = valTxt ? `${freqTxt}  ${valTxt}` : freqTxt;
-    ctx.font = '500 11px "JetBrains Mono", monospace';
+    ctx.font = th.tagFont;
     const tw = ctx.measureText(text).width + 14;
     const bx = Math.min(hover.x + 12, r.x + r.w - tw - 4);
     const by = Math.max(hover.y - 30, r.y + 4);
-    ctx.fillStyle = LABEL_BG;
+    ctx.fillStyle = th.tagBg;
     ctx.fillRect(bx, by, tw, 20);
-    ctx.strokeStyle = 'rgba(158, 178, 216, 0.3)';
+    ctx.strokeStyle = th.tagBorder;
     ctx.strokeRect(bx + 0.5, by + 0.5, tw - 1, 19);
-    ctx.fillStyle = '#d9e2f4';
+    ctx.fillStyle = th.text;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillText(text, bx + 7, by + 10);

@@ -220,11 +220,20 @@ export function initUI(state, engine, callbacks) {
   bindSeg('cwtq', 'cwtOmega0', (v) => parseInt(v, 10));
 
   function updateCwtRows() {
-    $('cwt-rows').hidden = state.get('sgMode') !== 'cwt';
+    const cwt = state.get('sgMode') === 'cwt';
+    $('cwt-rows').hidden = !cwt;
+    // FFT size / window don't apply to the wavelet spectrogram; in the
+    // spectrogram view they're the only Analysis rows, so hide the group
+    const hideFft = cwt && state.get('view') === 'spectrogram';
+    $('row-fft').hidden = hideFft;
+    $('row-window').hidden = hideFft;
+    if (hideFft) $('grp-analysis').hidden = true;
+    else $('grp-analysis').hidden = !['spectrum', 'spectrogram'].includes(state.get('view'));
   }
 
   state.on('sgMode', updateCwtRows);
-  updateCwtRows();
+  // NOTE: view changes reach updateCwtRows via updateViewVisibility below,
+  // which must run first (it also toggles grp-analysis).
 
   // ---------- scope ----------
   bindSelect('sel-scopespan', 'scopeSpan', (v) => parseFloat(v));
@@ -238,6 +247,7 @@ export function initUI(state, engine, callbacks) {
     for (const el of document.querySelectorAll('[data-views]')) {
       el.hidden = !el.dataset.views.split(' ').includes(view);
     }
+    updateCwtRows(); // re-applies the analysis-group rule for CWT mode
   }
 
   state.on('view', updateViewVisibility);

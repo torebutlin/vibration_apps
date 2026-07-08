@@ -1,9 +1,7 @@
 // Scope view: time-domain trace with optional rising-edge trigger for a
 // stable display, plus RMS / peak level readouts.
 
-import { Axes } from '../../../../shared/js/plot/axes.js';
-
-const TRACE = '#3fe8d2';
+import { Axes, plotTheme } from '../../../../shared/js/plot/axes.js';
 
 export class ScopeView {
   constructor(state) {
@@ -58,11 +56,14 @@ export class ScopeView {
   }
 
   render(ctx, w, h, hover) {
+    const th = plotTheme();
     const span = this.state.get('scopeSpan');
     const n = Math.floor(span * this.sampleRate);
+    const useMs = span < 1;
+    const xMax = useMs ? span * 1000 : span;
     const m = { l: 64, r: 14, t: 14, b: 46 };
     this.axes.setRect(m.l, m.t, w - m.l - m.r, h - m.t - m.b);
-    this.axes.setX(0, span * 1000, false); // ms
+    this.axes.setX(0, xMax, false);
 
     // y auto: generous headroom, min +-0.01
     const yr = Math.max(this.peak * 1.3, 0.01);
@@ -70,9 +71,9 @@ export class ScopeView {
 
     ctx.clearRect(0, 0, w, h);
     this.axes.draw(ctx, {
-      xLabel: 'time · ms',
+      xLabel: useMs ? 'time · ms' : 'time · s',
       yLabel: 'signal · full scale',
-      xFmt: (v) => (span < 0.02 ? v.toFixed(1) : v.toFixed(0)),
+      xFmt: (v) => (span < 0.02 || !useMs ? +v.toFixed(1) + '' : v.toFixed(0)),
       yFmt: (v) => (yr < 0.1 ? v.toFixed(3) : v.toFixed(2)),
     });
 
@@ -86,7 +87,7 @@ export class ScopeView {
     ctx.clip();
 
     // zero line
-    ctx.strokeStyle = 'rgba(158, 178, 216, 0.2)';
+    ctx.strokeStyle = th.gridStrong;
     ctx.lineWidth = 1;
     const zy = Math.round(this.axes.yToPx(0)) + 0.5;
     ctx.beginPath();
@@ -95,7 +96,7 @@ export class ScopeView {
     ctx.stroke();
 
     // trace: step through samples, decimate to ~2 points per px
-    ctx.strokeStyle = TRACE;
+    ctx.strokeStyle = th.traceMain;
     ctx.lineWidth = 1.5;
     ctx.lineJoin = 'round';
     ctx.beginPath();
@@ -112,25 +113,25 @@ export class ScopeView {
     // level readout
     const rmsDb = 20 * Math.log10(Math.max(this.rms, 1e-9));
     const peakDb = 20 * Math.log10(Math.max(this.peak, 1e-9));
-    ctx.font = '500 11px "JetBrains Mono", monospace';
-    ctx.fillStyle = '#8391ab';
+    ctx.font = th.tagFont;
+    ctx.fillStyle = th.label;
     ctx.textAlign = 'right';
     ctx.textBaseline = 'top';
     ctx.fillText(`rms ${rmsDb.toFixed(1)} dBFS   peak ${peakDb.toFixed(1)} dBFS`, r.x + r.w - 6, r.y + 6);
 
     if (hover && this.axes.inRect(hover.x, hover.y)) {
       const t = this.axes.pxToX(hover.x);
-      const idx = Math.round((t / (span * 1000)) * n);
+      const idx = Math.round((t / xMax) * n);
       const v = this.buf[Math.min(start + idx, this.buf.length - 1)];
-      const text = `${t.toFixed(2)} ms  ${v.toFixed(4)}`;
+      const text = `${t.toFixed(2)} ${useMs ? 'ms' : 's'}  ${v.toFixed(4)}`;
       const tw = ctx.measureText(text).width + 14;
       const bx = Math.min(hover.x + 12, r.x + r.w - tw - 4);
       const by = Math.max(hover.y - 30, r.y + 4);
-      ctx.fillStyle = 'rgba(13, 17, 25, 0.85)';
+      ctx.fillStyle = th.tagBg;
       ctx.fillRect(bx, by, tw, 20);
-      ctx.strokeStyle = 'rgba(158, 178, 216, 0.3)';
+      ctx.strokeStyle = th.tagBorder;
       ctx.strokeRect(bx + 0.5, by + 0.5, tw - 1, 19);
-      ctx.fillStyle = '#d9e2f4';
+      ctx.fillStyle = th.text;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
       ctx.fillText(text, bx + 7, by + 10);

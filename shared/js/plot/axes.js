@@ -1,15 +1,45 @@
 // Canvas axes: linear/log scales, nice ticks, grid, labels.
 // All drawing in CSS pixels — caller scales the context for devicePixelRatio.
 
-export const AXIS_THEME = {
-  grid: 'rgba(158, 178, 216, 0.07)',
-  gridStrong: 'rgba(158, 178, 216, 0.14)',
-  frame: 'rgba(158, 178, 216, 0.25)',
-  label: '#8391ab',
-  title: '#56617a',
+const FONTS = {
   font: '11px "JetBrains Mono", monospace',
   titleFont: '600 11px Rajdhani, sans-serif',
+  tagFont: '500 11px "JetBrains Mono", monospace',
 };
+
+// Plot colours come from the CSS custom properties in shared/css/theme.css,
+// so the canvas follows the active light/dark theme. Cached per theme.
+let cachedTheme = null;
+
+export function plotTheme() {
+  if (cachedTheme) return cachedTheme;
+  const cs = getComputedStyle(document.documentElement);
+  const v = (name, fallback) => cs.getPropertyValue(name).trim() || fallback;
+  cachedTheme = {
+    ...FONTS,
+    grid: v('--plot-grid', 'rgba(158,178,216,0.07)'),
+    gridStrong: v('--plot-grid-strong', 'rgba(158,178,216,0.14)'),
+    frame: v('--plot-frame', 'rgba(158,178,216,0.25)'),
+    label: v('--plot-label', '#8391ab'),
+    title: v('--plot-title', '#56617a'),
+    text: v('--plot-text', '#d9e2f4'),
+    crosshair: v('--plot-crosshair', 'rgba(217,226,244,0.25)'),
+    traceMain: v('--trace-main', '#3fe8d2'),
+    traceGhost: v('--trace-ghost', 'rgba(63,232,210,0.28)'),
+    tracePeak: v('--trace-peak', '#ffb454'),
+    tagBg: v('--plot-tag-bg', 'rgba(13,17,25,0.85)'),
+    tagBorder: v('--plot-tag-border', 'rgba(158,178,216,0.3)'),
+    persistColor: v('--plot-persist-color', 'rgba(63,232,210,0.05)'),
+    persistComp: v('--plot-persist-comp', 'lighter'),
+  };
+  return cachedTheme;
+}
+
+if (typeof document !== 'undefined') {
+  new MutationObserver(() => {
+    cachedTheme = null;
+  }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+}
 
 /** Format a frequency-like value compactly: 850, 1.2k, 12.5k */
 export function fmtHz(v) {
@@ -134,7 +164,7 @@ export class Axes {
    * @param {object} opts { xLabel, yLabel, xFmt, yFmt, theme }
    */
   draw(ctx, opts = {}) {
-    const t = { ...AXIS_THEME, ...(opts.theme || {}) };
+    const t = { ...plotTheme(), ...(opts.theme || {}) };
     const { x: rx, y: ry, w, h } = this.rect;
     const xFmt = opts.xFmt || fmtHz;
     const yFmt = opts.yFmt || fmtVal;
