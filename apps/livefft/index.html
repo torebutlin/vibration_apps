@@ -74,7 +74,7 @@
         </div>
       </div>
 
-      <div class="group" data-views="spectrum spectrogram" id="grp-analysis">
+      <div class="group" data-views="spectrum" id="grp-analysis">
         <h3 class="group-title">Analysis</h3>
         <div class="row" id="row-fft">
           <label for="sel-fft" data-tip="Samples per FFT. Longer = finer frequency resolution (Δf = fs / N) but slower response to change. Not used by the wavelet spectrogram.">FFT size</label>
@@ -199,9 +199,9 @@
         </div>
       </div>
 
-      <div class="group" data-views="spectrogram">
+      <div class="group" data-views="spectrogram" id="grp-spectrogram">
         <h3 class="group-title">Spectrogram</h3>
-        <div class="row">
+        <div class="row" id="row-sgmethod">
           <label data-tip="STFT: fixed FFT resolution everywhere. Wavelet (Morlet CWT): resolution scales with frequency — sharp in time at high frequency, sharp in frequency at low frequency (constant Q).">Method</label>
           <nav class="seg">
             <input type="radio" name="sgmode" value="stft" id="sg-stft">
@@ -210,32 +210,10 @@
             <label for="sg-cwt">Wavelet</label>
           </nav>
         </div>
-        <div class="row">
-          <label for="sel-sgspan" data-tip="How much history the display shows.">Time span</label>
-          <select id="sel-sgspan">
-            <option value="5">5 s</option><option value="10">10 s</option>
-            <option value="20">20 s</option><option value="60">60 s</option>
-          </select>
-        </div>
-        <div class="row">
-          <label for="sel-cmap">Colours</label>
-          <select id="sel-cmap">
-            <option value="inferno">Inferno</option>
-            <option value="viridis">Viridis</option>
-            <option value="magma">Magma</option>
-            <option value="plasma">Plasma</option>
-          </select>
-        </div>
-        <div class="row">
-          <label for="rng-sgfloor" data-tip="Level (dBFS) mapped to the darkest colour — everything quieter is black.">Floor</label>
-          <input type="range" id="rng-sgfloor" min="-140" max="-40" step="5" style="width: 7rem;">
-          <span class="readout" id="ro-sgfloor">-95</span>
-        </div>
-        <div class="row">
-          <label for="rng-sgceil" data-tip="Level (dBFS) mapped to the brightest colour — everything louder saturates.">Ceiling</label>
-          <input type="range" id="rng-sgceil" min="-60" max="0" step="5" style="width: 7rem;">
-          <span class="readout" id="ro-sgceil">-15</span>
-        </div>
+        <!-- method-specific rows sit directly under Method: the FFT size /
+             window rows are moved here by ui.js in this view (STFT), and
+             the wavelet rows below show in CWT mode — the shared rows
+             further down never move when toggling -->
         <div id="cwt-rows" hidden>
           <div class="row">
             <label for="num-cwtfmin" data-tip="Frequency range the wavelet analysis covers. Lower f min needs longer wavelets, so the display lags a little more.">f min / max</label>
@@ -262,6 +240,32 @@
               <label for="cwtq-24">High</label>
             </nav>
           </div>
+        </div>
+        <div class="row">
+          <label for="sel-sgspan" data-tip="How much history the display shows.">Time span</label>
+          <select id="sel-sgspan">
+            <option value="5">5 s</option><option value="10">10 s</option>
+            <option value="20">20 s</option><option value="60">60 s</option>
+          </select>
+        </div>
+        <div class="row">
+          <label for="sel-cmap">Colours</label>
+          <select id="sel-cmap">
+            <option value="inferno">Inferno</option>
+            <option value="viridis">Viridis</option>
+            <option value="magma">Magma</option>
+            <option value="plasma">Plasma</option>
+          </select>
+        </div>
+        <div class="row">
+          <label for="rng-sgfloor" data-tip="Level (dBFS) mapped to the darkest colour — everything quieter is black.">Floor</label>
+          <input type="range" id="rng-sgfloor" min="-140" max="-40" step="5" style="width: 7rem;">
+          <span class="readout" id="ro-sgfloor">-95</span>
+        </div>
+        <div class="row">
+          <label for="rng-sgceil" data-tip="Level (dBFS) mapped to the brightest colour — everything louder saturates.">Ceiling</label>
+          <input type="range" id="rng-sgceil" min="-60" max="0" step="5" style="width: 7rem;">
+          <span class="readout" id="ro-sgceil">-15</span>
         </div>
       </div>
 

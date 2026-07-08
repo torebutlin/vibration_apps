@@ -132,7 +132,13 @@ export class SpectrogramView {
   #rebuild() {
     const s = this.state;
     const fs = this.sampleRate;
-    this.colPeriodSamples = (s.get('sgSpan') * fs) / COLS;
+    // Total display delay (CWT): wavelet latency (4 sigma at fMin) plus
+    // the batch margin. The column ring covers span + delay so the plot
+    // stays filled edge-to-edge despite the delayed drawing position.
+    this.displayDelaySec = this.isCwt
+      ? (4 * s.get('cwtOmega0')) / (2 * Math.PI * s.get('cwtFMin')) + CWT_DISPLAY_MARGIN
+      : 0;
+    this.colPeriodSamples = ((s.get('sgSpan') + this.displayDelaySec) * fs) / COLS;
     this.sinceCol = 0;
     this.lastTotal = 0;
     this.newestColTotal = 0;
@@ -353,45 +359,40 @@ export class SpectrogramView {
     ctx.clearRect(0, 0, w, h);
     const r = this.axes.rect;
 
-    // Smooth scrolling: shift the image left by the audio time elapsed
-    // since the newest written column, so the display glides continuously
-    // even when columns arrive in batches (CWT worker results). In CWT
-    // mode the whole display is additionally delayed by a fixed margin so
-    // freshly computed columns overhang the right edge and scroll into
-    // view — the edge stays filled.
-    let offsetPx = 0;
+    // Smooth scrolling on the audio clock. The plot maps display time
+    // [now - D - span, now - D] where D is the display delay (0 for STFT).
+    // The ring holds span + D seconds, so freshly computed CWT columns
+    // overhang the right edge and glide into view — no hovering gap, and
+    // the left edge stays covered too.
+    const fsr = this.sampleRate;
+    const dSamples = this.displayDelaySec * fsr;
+    const pxPerSample = r.w / (s.get('sgSpan') * fsr);
+    let xEnd = r.x + r.w; // newest column's right edge, in px
     if (this.newestColTotal > 0) {
-      // total display delay: wavelet latency (already in the column
-      // timestamps) plus the batch margin
-      const delaySamples = this.isCwt
-        ? (this.cwtLatency + CWT_DISPLAY_MARGIN) * this.sampleRate
-        : 0;
-      const pendingCols = (this.curTotal - this.newestColTotal - delaySamples) / this.colPeriodSamples;
-      offsetPx = Math.min((pendingCols / COLS) * r.w, r.w * 0.3);
+      xEnd = r.x + r.w + (this.newestColTotal - this.curTotal + dSamples) * pxPerSample;
+      xEnd = Math.max(Math.min(xEnd, r.x + 2 * r.w), r.x);
     }
+    const ringW = COLS * this.colPeriodSamples * pxPerSample; // >= r.w + D px
+    const xStart = xEnd - ringW;
 
-    // heatmap: ring buffer as two slices; newest column at right edge - offset
     ctx.save();
     ctx.beginPath();
     ctx.rect(r.x, r.y, r.w, r.h);
     ctx.clip();
     ctx.imageSmoothingEnabled = true;
-    const x0 = r.x - offsetPx;
     const wNew = this.writeCol;            // columns 0..writeCol-1 are newest chunk's tail
     const wOld = COLS - wNew;
     if (wOld > 0) {
-      ctx.drawImage(this.img, wNew, 0, wOld, ROWS, x0, r.y, (wOld / COLS) * r.w, r.h);
+      ctx.drawImage(this.img, wNew, 0, wOld, ROWS, xStart, r.y, (wOld / COLS) * ringW, r.h);
     }
     if (wNew > 0) {
-      ctx.drawImage(this.img, 0, 0, wNew, ROWS, x0 + (wOld / COLS) * r.w, r.y, (wNew / COLS) * r.w, r.h);
+      ctx.drawImage(this.img, 0, 0, wNew, ROWS, xStart + (wOld / COLS) * ringW, r.y, (wNew / COLS) * ringW, r.h);
     }
-    if (offsetPx !== 0) {
-      // uncovered strip (right: not yet computed; left: image shifted
-      // right by the display delay): paint as silence, not page bg
+    if (xEnd < r.x + r.w) {
+      // not-yet-computed strip at the right: paint as silence, not page bg
       const lut = this.lut;
       ctx.fillStyle = `rgb(${lut[0]}, ${lut[1]}, ${lut[2]})`;
-      if (offsetPx > 0) ctx.fillRect(r.x + r.w - offsetPx, r.y, offsetPx, r.h);
-      else ctx.fillRect(r.x, r.y, -offsetPx, r.h);
+      ctx.fillRect(xEnd, r.y, r.x + r.w - xEnd, r.h);
     }
     ctx.restore();
 
@@ -411,8 +412,8 @@ export class SpectrogramView {
     ctx.textAlign = 'right';
     ctx.textBaseline = 'top';
     const range = `${s.get('sgFloorDb')}…${s.get('sgCeilDb')} dBFS`;
-    const note = this.isCwt && this.cwtLatency
-      ? `CWT · display −${(this.cwtLatency + CWT_DISPLAY_MARGIN).toFixed(2)} s · ${range}`
+    const note = this.isCwt && this.displayDelaySec
+      ? `CWT · display −${this.displayDelaySec.toFixed(2)} s · ${range}`
       : range;
     ctx.fillText(note, r.x + r.w - 4, r.y + 4);
 

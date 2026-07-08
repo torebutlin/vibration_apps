@@ -175,7 +175,16 @@ body.running #brand-name::after {
   margin: 0.8rem 0.8rem 0.4rem 0.4rem;
   overflow-y: auto;
   scrollbar-gutter: stable;
+  display: flex;
+  flex-direction: column;
 }
+
+#panel .group { flex: none; }
+
+/* In the spectrogram view the method + its settings come first, so
+   toggling STFT/Wavelet never moves the shared controls below them. */
+#grp-source { order: -2; }
+body[data-view='spectrogram'] #grp-spectrogram { order: -1; }
 
 #panel .group:first-child { border-top: none; }
 

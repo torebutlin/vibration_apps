@@ -227,19 +227,27 @@ export function initUI(state, engine, callbacks) {
 
   function updateCwtRows() {
     const cwt = state.get('sgMode') === 'cwt';
+    const specView = state.get('view') === 'spectrogram';
     $('cwt-rows').hidden = !cwt;
-    // FFT size / window don't apply to the wavelet spectrogram; in the
-    // spectrogram view they're the only Analysis rows, so hide the group
-    const hideFft = cwt && state.get('view') === 'spectrogram';
+    // FFT size / window are the STFT method settings: in the spectrogram
+    // view they live directly under the Method toggle; in the spectrum
+    // view they belong to the Analysis group
+    if (specView) {
+      $('cwt-rows').after($('row-fft'));
+      $('row-fft').after($('row-window'));
+    } else {
+      const title = $('grp-analysis').querySelector('.group-title');
+      title.after($('row-fft'));
+      $('row-fft').after($('row-window'));
+    }
+    const hideFft = cwt && specView;
     $('row-fft').hidden = hideFft;
     $('row-window').hidden = hideFft;
-    if (hideFft) $('grp-analysis').hidden = true;
-    else $('grp-analysis').hidden = !['spectrum', 'spectrogram'].includes(state.get('view'));
   }
 
   state.on('sgMode', updateCwtRows);
   // NOTE: view changes reach updateCwtRows via updateViewVisibility below,
-  // which must run first (it also toggles grp-analysis).
+  // which must run first.
 
   // ---------- scope ----------
   bindSelect('sel-scopespan', 'scopeSpan', (v) => parseFloat(v));
@@ -250,10 +258,11 @@ export function initUI(state, engine, callbacks) {
 
   function updateViewVisibility() {
     const view = state.get('view');
+    document.body.dataset.view = view;
     for (const el of document.querySelectorAll('[data-views]')) {
       el.hidden = !el.dataset.views.split(' ').includes(view);
     }
-    updateCwtRows(); // re-applies the analysis-group rule for CWT mode
+    updateCwtRows(); // re-homes the method-specific rows
   }
 
   state.on('view', updateViewVisibility);
