@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Live FFT — Vibration Apps</title>
+  <meta name="description" content="Live FFT / PSD spectrum analyzer with spectrogram and wavelet views. Microphone input, measurement-grade scaling.">
+  <meta name="theme-color" content="#07090f">
+  <link rel="manifest" href="app.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="../../shared/css/theme.css">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <div id="app">
+    <header id="topbar">
+      <div id="brand">
+        <span id="brand-name">LIVE FFT</span>
+        <span id="brand-sub">vibration apps</span>
+      </div>
+
+      <nav class="seg" id="view-tabs" aria-label="View">
+        <input type="radio" name="view" value="spectrum" id="view-spectrum">
+        <label for="view-spectrum">Spectrum</label>
+        <input type="radio" name="view" value="spectrogram" id="view-spectrogram">
+        <label for="view-spectrogram">Spectrogram</label>
+        <input type="radio" name="view" value="scope" id="view-scope">
+        <label for="view-scope">Scope</label>
+      </nav>
+
+      <div id="topbar-right">
+        <span class="lamp" id="lamp-clip">CLIP</span>
+        <button class="btn primary" id="btn-run" title="Space bar toggles run/pause">▶ Start</button>
+        <button class="btn" id="btn-panel" aria-label="Toggle controls">☰</button>
+      </div>
+    </header>
+
+    <main id="stage">
+      <div id="plot-wrap">
+        <canvas id="plot"></canvas>
+        <div id="overlay-msg">
+          <div id="overlay-card">
+            <h2>Live FFT analyzer</h2>
+            <p>Real-time spectrum, spectrogram and waveform from your microphone,
+               with measurement-grade scaling (dBFS).</p>
+            <p class="dim">Choose a source and press <b>Start</b>. Demo signals work
+               without microphone access.</p>
+          </div>
+        </div>
+      </div>
+      <div id="statusbar">
+        <span class="readout">fs <b id="ro-fs">—</b><span class="unit"> Hz</span></span>
+        <span class="readout">Δf <b id="ro-res">—</b></span>
+        <span class="readout" id="ro-avg-wrap" hidden>avg <b id="ro-avg">0</b></span>
+        <span class="readout" id="ro-peak-wrap">peak <b id="ro-peak">—</b></span>
+        <span class="readout dim" id="ro-hint">drag to zoom · double-click to reset · space runs</span>
+      </div>
+    </main>
+
+    <aside id="panel" class="panel">
+      <div class="group" id="grp-source">
+        <h3 class="group-title">Source</h3>
+        <div class="row">
+          <label for="sel-source">Input</label>
+          <select id="sel-source"></select>
+        </div>
+        <div class="row" id="row-monitor" hidden>
+          <label for="rng-monitor">Listen</label>
+          <input type="range" id="rng-monitor" min="0" max="0.5" step="0.01" style="width: 9rem;">
+        </div>
+      </div>
+
+      <div class="group" data-views="spectrum spectrogram">
+        <h3 class="group-title">Analysis</h3>
+        <div class="row">
+          <label for="sel-fft">FFT size</label>
+          <select id="sel-fft">
+            <option>512</option><option>1024</option><option>2048</option>
+            <option>4096</option><option>8192</option><option>16384</option>
+            <option>32768</option>
+          </select>
+        </div>
+        <div class="row">
+          <label for="sel-window">Window</label>
+          <select id="sel-window">
+            <option value="hann">Hann</option>
+            <option value="rectangular">Rectangular</option>
+            <option value="hamming">Hamming</option>
+            <option value="blackman">Blackman</option>
+            <option value="flattop">Flat-top</option>
+          </select>
+        </div>
+        <div class="row" data-views="spectrum">
+          <label>Resolution</label>
+          <nav class="seg">
+            <input type="radio" name="resmode" value="standard" id="res-standard">
+            <label for="res-standard" title="Single FFT length">Fixed</label>
+            <input type="radio" name="resmode" value="multires" id="res-multires">
+            <label for="res-multires" title="Longer windows at low frequency (16× finer bins below fs/32)">Multi-res</label>
+          </nav>
+        </div>
+        <div class="row" data-views="spectrum">
+          <label>Quantity</label>
+          <nav class="seg">
+            <input type="radio" name="quantity" value="amplitude" id="q-amp">
+            <label for="q-amp" title="Peak amplitude of each sine component">Amp</label>
+            <input type="radio" name="quantity" value="rms" id="q-rms">
+            <label for="q-rms" title="RMS amplitude">RMS</label>
+            <input type="radio" name="quantity" value="psd" id="q-psd">
+            <label for="q-psd" title="Power spectral density (per Hz)">PSD</label>
+          </nav>
+        </div>
+      </div>
+
+      <div class="group" data-views="spectrum">
+        <h3 class="group-title">Averaging</h3>
+        <div class="row">
+          <label>Mode</label>
+          <nav class="seg">
+            <input type="radio" name="avgmode" value="off" id="avg-off">
+            <label for="avg-off">Off</label>
+            <input type="radio" name="avgmode" value="exponential" id="avg-exp">
+            <label for="avg-exp" title="Running exponential average">Exp</label>
+            <input type="radio" name="avgmode" value="linear" id="avg-lin">
+            <label for="avg-lin" title="Average N spectra then hold">Linear</label>
+          </nav>
+        </div>
+        <div class="row" id="row-tau">
+          <label for="rng-tau">Time const</label>
+          <input type="range" id="rng-tau" min="-1.3" max="1" step="0.05" style="width: 6rem; flex: 1;">
+          <span class="readout" id="ro-tau" style="min-width: 3.6rem; text-align: right;">0.5 s</span>
+        </div>
+        <div class="row" id="row-linN" hidden>
+          <label for="sel-linN">Averages</label>
+          <select id="sel-linN">
+            <option>4</option><option>8</option><option>16</option>
+            <option>32</option><option>64</option><option>128</option>
+          </select>
+          <button class="btn small" id="btn-avg-restart">Restart</button>
+        </div>
+        <div class="row">
+          <label for="sw-peakhold">Peak hold</label>
+          <span style="display:flex; align-items:center; gap:0.5rem;">
+            <span class="switch"><input type="checkbox" id="sw-peakhold"><span class="track"></span></span>
+            <button class="btn small" id="btn-peakreset">Reset</button>
+          </span>
+        </div>
+      </div>
+
+      <div class="group" data-views="spectrum">
+        <h3 class="group-title">Display</h3>
+        <div class="row">
+          <label for="sw-db">dB scale</label>
+          <span class="switch"><input type="checkbox" id="sw-db"><span class="track"></span></span>
+        </div>
+        <div class="row">
+          <label for="sw-persist" title="Fading trace history, like a phosphor screen">Persistence</label>
+          <span class="switch"><input type="checkbox" id="sw-persist"><span class="track"></span></span>
+        </div>
+        <div class="row">
+          <label for="sel-peaklabels">Peak labels</label>
+          <select id="sel-peaklabels">
+            <option value="0">Off</option><option value="2">2</option>
+            <option value="4">4</option><option value="6">6</option><option value="8">8</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="group" data-views="spectrum spectrogram">
+        <h3 class="group-title">Frequency axis</h3>
+        <div class="row">
+          <label>Scale</label>
+          <nav class="seg">
+            <input type="radio" name="fscale" value="linear" id="fs-lin">
+            <label for="fs-lin">Linear</label>
+            <input type="radio" name="fscale" value="log" id="fs-log">
+            <label for="fs-log">Log</label>
+          </nav>
+        </div>
+        <div class="row">
+          <label for="sel-frange">Range</label>
+          <select id="sel-frange">
+            <option value="auto">Full</option>
+            <option value="500">to 500 Hz</option>
+            <option value="1000">to 1 kHz</option>
+            <option value="2000">to 2 kHz</option>
+            <option value="5000">to 5 kHz</option>
+            <option value="10000">to 10 kHz</option>
+            <option value="custom" hidden>Custom (zoomed)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="group" data-views="spectrum">
+        <h3 class="group-title">Amplitude axis</h3>
+        <div class="row">
+          <label for="sw-ampauto">Auto range</label>
+          <span class="switch"><input type="checkbox" id="sw-ampauto"><span class="track"></span></span>
+        </div>
+        <div class="row" id="row-amprange" hidden>
+          <label>dB min / max</label>
+          <span style="display:flex; gap:0.4rem;">
+            <input type="number" id="num-ampmin" step="5" style="width:4.4rem;">
+            <input type="number" id="num-ampmax" step="5" style="width:4.4rem;">
+          </span>
+        </div>
+      </div>
+
+      <div class="group" data-views="spectrogram">
+        <h3 class="group-title">Spectrogram</h3>
+        <div class="row">
+          <label>Method</label>
+          <nav class="seg">
+            <input type="radio" name="sgmode" value="stft" id="sg-stft">
+            <label for="sg-stft" title="Short-time FFT: fixed resolution">STFT</label>
+            <input type="radio" name="sgmode" value="cwt" id="sg-cwt">
+            <label for="sg-cwt" title="Morlet wavelet: multi-resolution (constant Q)">Wavelet</label>
+          </nav>
+        </div>
+        <div class="row">
+          <label for="sel-sgspan">Time span</label>
+          <select id="sel-sgspan">
+            <option value="5">5 s</option><option value="10">10 s</option>
+            <option value="20">20 s</option><option value="60">60 s</option>
+          </select>
+        </div>
+        <div class="row">
+          <label for="sel-cmap">Colours</label>
+          <select id="sel-cmap">
+            <option value="inferno">Inferno</option>
+            <option value="viridis">Viridis</option>
+            <option value="magma">Magma</option>
+            <option value="plasma">Plasma</option>
+          </select>
+        </div>
+        <div class="row">
+          <label for="rng-sgfloor">Floor</label>
+          <input type="range" id="rng-sgfloor" min="-140" max="-40" step="5" style="width: 7rem;">
+          <span class="readout" id="ro-sgfloor">-95</span>
+        </div>
+        <div class="row">
+          <label for="rng-sgceil">Ceiling</label>
+          <input type="range" id="rng-sgceil" min="-60" max="0" step="5" style="width: 7rem;">
+          <span class="readout" id="ro-sgceil">-15</span>
+        </div>
+        <div id="cwt-rows" hidden>
+          <div class="row">
+            <label for="num-cwtfmin">f min / max</label>
+            <span style="display:flex; gap:0.4rem;">
+              <input type="number" id="num-cwtfmin" min="5" step="5" style="width:4.4rem;">
+              <input type="number" id="num-cwtfmax" min="100" step="100" style="width:4.4rem;">
+            </span>
+          </div>
+          <div class="row">
+            <label for="sel-cwtbpo">Bins / octave</label>
+            <select id="sel-cwtbpo">
+              <option>8</option><option>12</option><option>16</option><option>24</option>
+            </select>
+          </div>
+          <div class="row">
+            <label title="Morlet ω₀: higher = better frequency resolution, worse time resolution">Wavelet Q</label>
+            <nav class="seg">
+              <input type="radio" name="cwtq" value="6" id="cwtq-6">
+              <label for="cwtq-6">Low</label>
+              <input type="radio" name="cwtq" value="12" id="cwtq-12">
+              <label for="cwtq-12">Med</label>
+              <input type="radio" name="cwtq" value="24" id="cwtq-24">
+              <label for="cwtq-24">High</label>
+            </nav>
+          </div>
+        </div>
+      </div>
+
+      <div class="group" data-views="scope">
+        <h3 class="group-title">Scope</h3>
+        <div class="row">
+          <label for="sel-scopespan">Time span</label>
+          <select id="sel-scopespan">
+            <option value="0.005">5 ms</option><option value="0.01">10 ms</option>
+            <option value="0.02">20 ms</option><option value="0.05">50 ms</option>
+            <option value="0.1">100 ms</option><option value="0.2">200 ms</option>
+            <option value="0.5">500 ms</option>
+          </select>
+        </div>
+        <div class="row">
+          <label for="sw-trigger">Trigger</label>
+          <span class="switch"><input type="checkbox" id="sw-trigger"><span class="track"></span></span>
+        </div>
+      </div>
+
+      <div class="group">
+        <p class="fine-print">
+          Levels are relative to device full scale (dBFS) — microphones are not
+          calibrated. Mic processing (AGC, noise suppression) is disabled for
+          measurement. Part of
+          <a href="../../index.html">Vibration&nbsp;Apps</a>.
+        </p>
+      </div>
+    </aside>
+  </div>
+
+  <div id="toast" hidden></div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

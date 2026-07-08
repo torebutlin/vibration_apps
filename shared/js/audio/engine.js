@@ -67,7 +67,12 @@ export class AudioEngine {
       this.monitorGain.gain.value = 0;
       this.workletNode.connect(this.monitorGain).connect(this.ctx.destination);
     }
-    if (this.ctx.state === 'suspended') await this.ctx.resume();
+    if (this.ctx.state === 'suspended') {
+      // Don't block on resume(): without user activation (e.g. automated
+      // testing) it may never resolve; audio simply starts when it does.
+      const p = this.ctx.resume();
+      await Promise.race([p, new Promise((res) => setTimeout(res, 400))]);
+    }
   }
 
   #append(block) {

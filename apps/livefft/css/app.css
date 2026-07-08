@@ -1,0 +1,249 @@
+/* Live FFT app layout: header / plot stage / control panel.
+   Desktop: sidebar right. Narrow screens: slide-over drawer. */
+
+html, body { height: 100%; overflow: hidden; }
+
+#app {
+  display: grid;
+  grid-template-areas:
+    'topbar topbar'
+    'stage panel';
+  grid-template-rows: auto 1fr;
+  grid-template-columns: 1fr auto;
+  height: 100dvh;
+}
+
+/* ---------- Top bar ---------- */
+
+#topbar {
+  grid-area: topbar;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.5rem 0.9rem;
+  border-bottom: 1px solid var(--line);
+  background:
+    radial-gradient(120% 180% at 0% 0%, rgba(56, 225, 200, 0.05), transparent 45%),
+    var(--bg-panel);
+}
+
+#brand {
+  display: flex;
+  flex-direction: column;
+  line-height: 1;
+  user-select: none;
+}
+
+#brand-name {
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  color: var(--text);
+}
+
+#brand-name::after {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+  opacity: 0.25;
+  transition: opacity 0.3s;
+}
+
+body.running #brand-name::after {
+  opacity: 1;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  50% { opacity: 0.45; }
+}
+
+#brand-sub {
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-top: 3px;
+}
+
+#view-tabs { margin-left: 0.4rem; }
+
+#topbar-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+#btn-run { min-width: 6.2rem; }
+#btn-panel { display: none; }
+
+/* ---------- Stage ---------- */
+
+#stage {
+  grid-area: stage;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  padding: 0.8rem 0.4rem 0.4rem 0.8rem;
+}
+
+#plot-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background:
+    radial-gradient(90% 90% at 50% 10%, rgba(56, 225, 200, 0.025), transparent 60%),
+    var(--bg-inset);
+  box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+#plot {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+}
+
+#overlay-msg {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+#overlay-card {
+  max-width: 26rem;
+  text-align: center;
+  padding: 2rem;
+  animation: fade-in 0.8s ease-out;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+}
+
+#overlay-card h2 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin: 0 0 0.6rem;
+  color: var(--text);
+}
+
+#overlay-card p {
+  margin: 0.4rem 0;
+  font-size: 0.95rem;
+  color: var(--text-dim);
+}
+
+#overlay-card .dim { color: var(--text-faint); font-size: 0.85rem; }
+#overlay-card b { color: var(--accent); }
+
+#statusbar {
+  display: flex;
+  align-items: center;
+  gap: 1.4rem;
+  padding: 0.45rem 0.4rem 0.1rem;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+#statusbar .dim { color: var(--text-faint); margin-left: auto; }
+
+#ro-peak { color: var(--accent); font-size: 0.95rem; }
+
+/* ---------- Panel ---------- */
+
+#panel {
+  grid-area: panel;
+  width: 264px;
+  margin: 0.8rem 0.8rem 0.4rem 0.4rem;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+#panel .group:first-child { border-top: none; }
+
+.fine-print {
+  font-size: 0.72rem;
+  line-height: 1.5;
+  color: var(--text-faint);
+  margin: 0;
+}
+
+.fine-print a { color: var(--text-dim); }
+
+/* ---------- Toast ---------- */
+
+#toast {
+  position: fixed;
+  left: 50%;
+  bottom: 1.4rem;
+  transform: translateX(-50%);
+  background: var(--bg-raised);
+  border: 1px solid rgba(255, 77, 94, 0.5);
+  color: var(--text);
+  font-size: 0.85rem;
+  padding: 0.55rem 1rem;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+  z-index: 30;
+  max-width: min(90vw, 30rem);
+}
+
+/* ---------- Narrow screens ---------- */
+
+@media (max-width: 860px) {
+  #app {
+    grid-template-areas:
+      'topbar'
+      'stage';
+    grid-template-columns: 1fr;
+  }
+
+  #btn-panel { display: inline-block; }
+
+  #panel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(20rem, 88vw);
+    margin: 0;
+    border-radius: 0;
+    border-right: none;
+    transform: translateX(105%);
+    transition: transform 0.25s ease;
+    z-index: 20;
+    box-shadow: -12px 0 40px rgba(0, 0, 0, 0.55);
+  }
+
+  body.panel-open #panel { transform: translateX(0); }
+
+  #stage { padding: 0.6rem 0.6rem 0.3rem; }
+  #brand-sub { display: none; }
+  #brand-name { font-size: 1.05rem; }
+  #view-tabs { margin-left: 0; }
+  #topbar { gap: 0.6rem; flex-wrap: wrap; padding: 0.45rem 0.6rem; }
+  #ro-hint { display: none; }
+}
+
+@media (max-width: 480px) {
+  #btn-run { min-width: 4.4rem; }
+  #statusbar { gap: 0.9rem; }
+}

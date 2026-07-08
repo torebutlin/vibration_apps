@@ -1,0 +1,434 @@
+// Spectrum view: live FFT / PSD with averaging, peak hold, peak labels,
+// optional phosphor persistence, multi-resolution mode, crosshair readout.
+
+import { SpectrumProcessor } from '../../../../shared/js/dsp/spectrum.js';
+import { MultiResSpectrum } from '../../../../shared/js/dsp/multires.js';
+import { findPeaks } from '../../../../shared/js/dsp/peaks.js';
+import { Axes, fmtHz } from '../../../../shared/js/plot/axes.js';
+
+const TRACE = '#3fe8d2';
+const TRACE_GHOST = 'rgba(63, 232, 210, 0.28)';
+const PEAK = '#ffb454';
+const LABEL_BG = 'rgba(13, 17, 25, 0.85)';
+
+const QUANTITY_LABELS = {
+  amplitude: { dB: 'dBFS (peak)', lin: 'amplitude (FS)' },
+  rms: { dB: 'dBFS (rms)', lin: 'amplitude (FS rms)' },
+  psd: { dB: 'dBFS/Hz', lin: 'PSD (FS²/Hz)' },
+};
+
+export class SpectrumView {
+  constructor(state) {
+    this.state = state;
+    this.axes = new Axes();
+    this.proc = null;
+    this.multi = null;
+    this.scratch = null;
+    this.display = null;        // Float32Array, standard mode
+    this.peakDisplay = null;
+    this.instDisplay = null;
+    this.persistCanvas = null;
+    this.autoTop = -20;         // smoothed auto range (dB)
+    this.autoBottom = -100;
+    this.dominantPeak = null;   // {freq, db} for the header readout
+    this.#configure();
+
+    state.on(['fftSize', 'windowName', 'resMode'], () => this.#configure());
+    state.on(['avgMode', 'expTimeConst', 'linearTarget'], () => this.#applyAveraging());
+    state.on(['quantity', 'dB'], () => this.clearPersistence());
+  }
+
+  #configure() {
+    const s = this.state;
+    const fftSize = s.get('fftSize');
+    const windowName = s.get('windowName');
+    this.proc = new SpectrumProcessor({ fftSize, windowName, sampleRate: this.sampleRate ?? 48000 });
+    // multires base size capped so 16N stays sane
+    const base = Math.min(fftSize, 8192);
+    this.multi = new MultiResSpectrum({ baseSize: base, windowName, sampleRate: this.sampleRate ?? 48000 });
+    this.#applyAveraging();
+    const need = Math.max(fftSize, this.multi.maxSize);
+    this.scratch = new Float32Array(need);
+    this.display = new Float32Array(this.proc.nBins);
+    this.peakDisplay = new Float32Array(this.proc.nBins);
+    this.instDisplay = new Float32Array(this.proc.nBins);
+    this.clearPersistence();
+  }
+
+  #applyAveraging() {
+    const s = this.state;
+    this.proc.setAveraging(s.get('avgMode'), {
+      expTimeConst: s.get('expTimeConst'),
+      linearTarget: s.get('linearTarget'),
+    });
+    this.multi.expTimeConst = Math.max(s.get('expTimeConst'), 0.1);
+  }
+
+  setSampleRate(fs) {
+    if (fs !== this.sampleRate) {
+      this.sampleRate = fs;
+      this.#configure();
+    }
+  }
+
+  resetAverage() {
+    this.proc.resetAverage();
+    this.multi.resetAverage();
+  }
+
+  resetPeakHold() {
+    this.proc.resetPeakHold();
+  }
+
+  clearPersistence() {
+    if (this.persistCanvas) {
+      this.persistCanvas.getContext('2d').clearRect(0, 0, this.persistCanvas.width, this.persistCanvas.height);
+    }
+  }
+
+  get avgProgress() {
+    if (this.state.get('avgMode') !== 'linear') return null;
+    return { count: this.proc.avgCount, target: this.proc.linearTarget, done: this.proc.linearDone };
+  }
+
+  /** Pull newest samples and update the processors. */
+  tick(engine, dt) {
+    const multires = this.state.get('resMode') === 'multires';
+    const need = multires ? this.multi.maxSize : this.proc.fftSize;
+    if (need > this.scratch.length) this.scratch = new Float32Array(need);
+    const view = this.scratch.subarray(0, need);
+    if (!engine.read(need, view)) return;
+    if (multires) {
+      this.multi.process(view, dt);
+    } else {
+      this.proc.process(view, dt);
+    }
+  }
+
+  /** Current frequency range honouring auto/manual state. */
+  #freqRange() {
+    const s = this.state;
+    const fs = this.sampleRate ?? 48000;
+    const log = s.get('freqScale') === 'log';
+    if (s.get('freqAuto')) return { min: log ? 20 : 0, max: fs / 2, log };
+    let min = s.get('freqMin');
+    let max = Math.min(s.get('freqMax'), fs / 2);
+    if (log) min = Math.max(min, 1);
+    return { min, max, log };
+  }
+
+  render(ctx, w, h, hover, rubberBand) {
+    const s = this.state;
+    const dB = s.get('dB');
+    const quantity = s.get('quantity');
+    const multires = s.get('resMode') === 'multires';
+    const fr = this.#freqRange();
+
+    // layout
+    const m = { l: 64, r: 14, t: 14, b: 46 };
+    this.axes.setRect(m.l, m.t, w - m.l - m.r, h - m.t - m.b);
+    this.axes.setX(fr.min, fr.max, fr.log);
+
+    // gather display data
+    let segments;
+    if (multires) {
+      segments = this.multi.segments(quantity, dB).map((seg) => ({
+        binHz: seg.binHz,
+        startBin: seg.startBin,
+        values: seg.values,
+        fLow: seg.fLow,
+        fHigh: seg.fHigh,
+      }));
+    } else {
+      this.proc.toDisplay(this.proc.avgPower, this.display, quantity, dB);
+      segments = [{ binHz: this.proc.binHz, startBin: 0, values: this.display }];
+    }
+
+    // y range
+    let yMin;
+    let yMax;
+    if (dB) {
+      if (s.get('ampAuto')) {
+        let peak = -160;
+        for (const seg of segments) {
+          for (let i = 0; i < seg.values.length; i++) {
+            const f = (seg.startBin + i) * seg.binHz;
+            if (f >= fr.min && f <= fr.max && seg.values[i] > peak) peak = seg.values[i];
+          }
+        }
+        const targetTop = Math.min(Math.ceil((peak + 8) / 10) * 10, 20);
+        this.autoTop += 0.15 * (targetTop - this.autoTop);
+        const span = quantity === 'psd' ? 110 : 120;
+        this.autoBottom = this.autoTop - span;
+        yMin = this.autoBottom;
+        yMax = this.autoTop;
+      } else {
+        yMin = s.get('ampMin');
+        yMax = s.get('ampMax');
+      }
+    } else {
+      let peak = 0;
+      for (const seg of segments) {
+        for (let i = 0; i < seg.values.length; i++) {
+          const f = (seg.startBin + i) * seg.binHz;
+          if (f >= fr.min && f <= fr.max && seg.values[i] > peak) peak = seg.values[i];
+        }
+      }
+      yMin = 0;
+      yMax = peak > 0 ? peak * 1.15 : 1;
+    }
+    this.axes.setY(yMin, yMax, false);
+
+    // grid + labels
+    ctx.clearRect(0, 0, w, h);
+    const qLabel = QUANTITY_LABELS[quantity][dB ? 'dB' : 'lin'];
+    this.axes.draw(ctx, {
+      xLabel: 'frequency · Hz',
+      yLabel: qLabel,
+      yFmt: dB ? (v) => v.toFixed(0) : undefined,
+    });
+
+    const r = this.axes.rect;
+
+    // clip to plot area for traces
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(r.x, r.y, r.w, r.h);
+    ctx.clip();
+
+    // persistence layer
+    if (s.get('persistence') && !multires) {
+      this.#renderPersistence(ctx, w, h, segments[0]);
+    }
+
+    // instantaneous ghost trace (standard mode, averaging on)
+    if (!multires && s.get('avgMode') !== 'off') {
+      this.proc.toDisplay(this.proc.power, this.instDisplay, quantity, dB);
+      this.#stroke(ctx, [{ binHz: this.proc.binHz, startBin: 0, values: this.instDisplay }], TRACE_GHOST, 1);
+    }
+
+    // peak hold trace
+    if (s.get('peakHold') && !multires && this.proc.peakValid) {
+      this.proc.toDisplay(this.proc.peakPower, this.peakDisplay, quantity, dB);
+      this.#stroke(ctx, [{ binHz: this.proc.binHz, startBin: 0, values: this.peakDisplay }], PEAK, 1);
+    }
+
+    // main trace
+    this.#stroke(ctx, segments, TRACE, 1.6);
+
+    // multires region boundaries
+    if (multires) {
+      ctx.strokeStyle = 'rgba(158, 178, 216, 0.25)';
+      ctx.setLineDash([3, 5]);
+      for (const seg of segments) {
+        if (seg.fLow > 0 && seg.fLow > fr.min && seg.fLow < fr.max) {
+          const px = this.axes.xToPx(seg.fLow);
+          ctx.beginPath();
+          ctx.moveTo(px, r.y);
+          ctx.lineTo(px, r.y + r.h);
+          ctx.stroke();
+        }
+      }
+      ctx.setLineDash([]);
+    }
+
+    ctx.restore();
+
+    // peak labels (drawn over frame edge allowed)
+    this.dominantPeak = null;
+    const nLabels = s.get('peakLabels');
+    if (nLabels > 0) this.#drawPeakLabels(ctx, segments, dB, nLabels);
+
+    // rubber band
+    if (rubberBand) {
+      ctx.fillStyle = 'rgba(56, 225, 200, 0.08)';
+      ctx.strokeStyle = 'rgba(56, 225, 200, 0.4)';
+      const x0 = Math.max(rubberBand.x0, r.x);
+      const x1 = Math.min(rubberBand.x1, r.x + r.w);
+      ctx.fillRect(x0, r.y, x1 - x0, r.h);
+      ctx.strokeRect(x0 + 0.5, r.y + 0.5, x1 - x0 - 1, r.h - 1);
+    }
+
+    // crosshair
+    if (hover && this.axes.inRect(hover.x, hover.y)) {
+      this.#drawCrosshair(ctx, hover, segments, dB);
+    }
+  }
+
+  #renderPersistence(ctx, w, h, seg) {
+    if (!this.persistCanvas || this.persistCanvas.width !== ctx.canvas.width || this.persistCanvas.height !== ctx.canvas.height) {
+      this.persistCanvas = document.createElement('canvas');
+      this.persistCanvas.width = ctx.canvas.width;
+      this.persistCanvas.height = ctx.canvas.height;
+    }
+    const pc = this.persistCanvas.getContext('2d');
+    const dpr = ctx.canvas.width / w;
+    pc.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // fade history
+    pc.globalCompositeOperation = 'destination-out';
+    pc.fillStyle = 'rgba(0, 0, 0, 0.045)';
+    pc.fillRect(0, 0, w, h);
+    // add current trace
+    pc.globalCompositeOperation = 'lighter';
+    pc.strokeStyle = 'rgba(63, 232, 210, 0.05)';
+    pc.lineWidth = 1.4;
+    this.#tracePath(pc, seg);
+    pc.stroke();
+    ctx.drawImage(this.persistCanvas, 0, 0, w, h);
+  }
+
+  #tracePath(ctx, seg) {
+    const { binHz, startBin, values } = seg;
+    const ax = this.axes;
+    ctx.beginPath();
+    let started = false;
+    const fMin = ax.x.min;
+    const fMax = ax.x.max;
+    for (let i = 0; i < values.length; i++) {
+      const f = (startBin + i) * binHz;
+      if (f < fMin - binHz || f > fMax + binHz) continue;
+      if (ax.x.log && f <= 0) continue;
+      const px = ax.xToPx(Math.max(f, 1e-3));
+      const py = ax.yToPx(values[i]);
+      if (!started) {
+        ctx.moveTo(px, py);
+        started = true;
+      } else {
+        ctx.lineTo(px, py);
+      }
+    }
+  }
+
+  #stroke(ctx, segments, color, width) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.lineJoin = 'round';
+    for (const seg of segments) {
+      this.#tracePath(ctx, seg);
+      ctx.stroke();
+    }
+  }
+
+  #drawPeakLabels(ctx, segments, dB, nLabels) {
+    // collect candidate peaks across segments (multires: per segment)
+    const all = [];
+    for (const seg of segments) {
+      // findPeaks expects dB-domain data
+      let arr = seg.values;
+      if (!dB) {
+        arr = new Float32Array(seg.values.length);
+        for (let i = 0; i < arr.length; i++) arr[i] = 20 * Math.log10(Math.max(seg.values[i], 1e-15));
+      }
+      const peaks = findPeaks(arr, nLabels, { startBin: seg.startBin === 0 ? 1 : 0 });
+      for (const p of peaks) {
+        const freq = (seg.startBin + p.bin + p.frac) * seg.binHz;
+        if (freq < this.axes.x.min || freq > this.axes.x.max) continue;
+        all.push({ freq, db: p.db, value: seg.values[p.bin] });
+      }
+    }
+    all.sort((a, b) => b.db - a.db);
+    const chosen = all.slice(0, nLabels).sort((a, b) => a.freq - b.freq);
+    if (all.length > 0) {
+      this.dominantPeak = { freq: all[0].freq, db: all[0].db };
+    }
+
+    ctx.font = '500 11px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    let lastLabelX = -Infinity;
+    let stagger = 0;
+    for (const p of chosen) {
+      const px = this.axes.xToPx(p.freq);
+      const py = this.axes.yToPx(p.value);
+      const label = p.freq >= 1000 ? `${(p.freq / 1000).toFixed(2)}k` : p.freq.toFixed(1);
+      const tw = ctx.measureText(label).width + 10;
+      stagger = px - lastLabelX < tw + 6 ? (stagger + 1) % 3 : 0;
+      const ly = Math.max(py - 12 - stagger * 15, this.axes.rect.y + 14);
+      // marker
+      ctx.fillStyle = PEAK;
+      ctx.beginPath();
+      ctx.arc(px, py, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+      // leader
+      ctx.strokeStyle = 'rgba(255, 180, 84, 0.35)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(px, py - 4);
+      ctx.lineTo(px, ly - 11);
+      ctx.stroke();
+      // tag
+      ctx.fillStyle = LABEL_BG;
+      ctx.fillRect(px - tw / 2, ly - 24, tw, 15);
+      ctx.strokeStyle = 'rgba(255, 180, 84, 0.4)';
+      ctx.strokeRect(px - tw / 2 + 0.5, ly - 23.5, tw - 1, 14);
+      ctx.fillStyle = PEAK;
+      ctx.fillText(label, px, ly - 11);
+      lastLabelX = px;
+    }
+  }
+
+  #drawCrosshair(ctx, hover, segments, dB) {
+    const ax = this.axes;
+    const r = ax.rect;
+    const freq = ax.pxToX(hover.x);
+    // find trace value at freq
+    let value = null;
+    for (const seg of segments) {
+      const fLo = seg.startBin * seg.binHz;
+      const fHi = (seg.startBin + seg.values.length - 1) * seg.binHz;
+      if (freq >= fLo && freq <= fHi && (seg.fLow === undefined || (freq > (seg.fLow || 0) && freq <= (seg.fHigh || Infinity)))) {
+        const idx = Math.round(freq / seg.binHz) - seg.startBin;
+        if (idx >= 0 && idx < seg.values.length) value = seg.values[idx];
+      }
+    }
+
+    ctx.save();
+    ctx.strokeStyle = 'rgba(217, 226, 244, 0.25)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(hover.x + 0.5, r.y);
+    ctx.lineTo(hover.x + 0.5, r.y + r.h);
+    ctx.stroke();
+    if (value !== null) {
+      const py = ax.yToPx(value);
+      ctx.beginPath();
+      ctx.moveTo(r.x, py + 0.5);
+      ctx.lineTo(r.x + r.w, py + 0.5);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = TRACE;
+      ctx.beginPath();
+      ctx.arc(hover.x, py, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.setLineDash([]);
+
+    // readout box
+    const freqTxt = freq >= 1000 ? `${(freq / 1000).toFixed(3)} kHz` : `${freq.toFixed(1)} Hz`;
+    const valTxt = value === null ? '' : dB ? `${value.toFixed(1)} dB` : value.toExponential(2);
+    const text = valTxt ? `${freqTxt}  ${valTxt}` : freqTxt;
+    ctx.font = '500 11px "JetBrains Mono", monospace';
+    const tw = ctx.measureText(text).width + 14;
+    const bx = Math.min(hover.x + 12, r.x + r.w - tw - 4);
+    const by = Math.max(hover.y - 30, r.y + 4);
+    ctx.fillStyle = LABEL_BG;
+    ctx.fillRect(bx, by, tw, 20);
+    ctx.strokeStyle = 'rgba(158, 178, 216, 0.3)';
+    ctx.strokeRect(bx + 0.5, by + 0.5, tw - 1, 19);
+    ctx.fillStyle = '#d9e2f4';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, bx + 7, by + 10);
+    ctx.restore();
+  }
+
+  /** Resolution text for the header readout. */
+  get resolutionText() {
+    if (this.state.get('resMode') === 'multires') {
+      const st = this.multi.stages;
+      return `${fmtHz(this.sampleRate / st[2].size)}–${fmtHz(this.sampleRate / st[0].size)} Hz`;
+    }
+    return `${(this.proc.binHz).toFixed(this.proc.binHz < 10 ? 2 : 1)} Hz`;
+  }
+}
