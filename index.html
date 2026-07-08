@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vibration Apps</title>
+  <meta name="description" content="Interactive web apps and demos for vibration teaching — spectrum analysis, waves, and more. Run in the browser, install on any device.">
+  <meta name="theme-color" content="#07090f">
+  <link rel="icon" href="apps/livefft/icons/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="shared/css/theme.css">
+  <style>
+    body {
+      min-height: 100dvh;
+      background:
+        radial-gradient(90% 60% at 50% -10%, rgba(56, 225, 200, 0.06), transparent 60%),
+        var(--bg-page);
+    }
+
+    .wrap {
+      max-width: 62rem;
+      margin: 0 auto;
+      padding: 4rem 1.4rem 3rem;
+    }
+
+    header.hero { margin-bottom: 3rem; }
+
+    .hero h1 {
+      font-size: clamp(2.2rem, 6vw, 3.4rem);
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      margin: 0;
+      color: var(--text);
+    }
+
+    .hero h1 .dot { color: var(--accent); }
+
+    .hero p.tagline {
+      margin: 0.8rem 0 0;
+      font-size: 1.05rem;
+      color: var(--text-dim);
+      max-width: 34rem;
+      line-height: 1.55;
+    }
+
+    .apps {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+      gap: 1rem;
+    }
+
+    a.card {
+      display: flex;
+      gap: 1rem;
+      align-items: flex-start;
+      padding: 1.1rem;
+      text-decoration: none;
+      transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
+    }
+
+    a.card:hover {
+      border-color: rgba(56, 225, 200, 0.45);
+      transform: translateY(-2px);
+      box-shadow: 0 10px 32px rgba(0, 0, 0, 0.45);
+    }
+
+    .card img {
+      width: 56px;
+      height: 56px;
+      border-radius: 12px;
+      flex: none;
+    }
+
+    .card h2 {
+      margin: 0 0 0.25rem;
+      font-size: 1.1rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      color: var(--text);
+    }
+
+    .card p {
+      margin: 0;
+      font-size: 0.85rem;
+      line-height: 1.5;
+      color: var(--text-dim);
+    }
+
+    .card .tags {
+      margin-top: 0.55rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+    }
+
+    .tag {
+      font-family: var(--font-mono);
+      font-size: 0.62rem;
+      letter-spacing: 0.06em;
+      color: var(--text-faint);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      padding: 0.12rem 0.4rem;
+    }
+
+    .soon {
+      border: 1px dashed var(--line);
+      border-radius: var(--radius);
+      padding: 1.1rem;
+      color: var(--text-faint);
+      font-size: 0.9rem;
+      display: flex;
+      align-items: center;
+      line-height: 1.5;
+    }
+
+    footer {
+      margin-top: 3.4rem;
+      font-size: 0.78rem;
+      color: var(--text-faint);
+      line-height: 1.6;
+    }
+
+    footer a { color: var(--text-dim); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="hero">
+      <h1>VIBRATION APPS<span class="dot">.</span></h1>
+      <p class="tagline">
+        Interactive tools and demos for vibration teaching — run them in the
+        browser, or install to your phone or laptop like a native app
+        (Share&nbsp;→&nbsp;Add&nbsp;to&nbsp;Home&nbsp;Screen, or the install icon in the address bar).
+      </p>
+    </header>
+
+    <main class="apps">
+      <a class="card panel" href="apps/livefft/">
+        <img src="apps/livefft/icons/icon-192.png" alt="">
+        <div>
+          <h2>LIVE FFT</h2>
+          <p>Real-time spectrum analyzer for the device microphone: FFT / PSD
+             with averaging and peak hold, STFT and wavelet spectrograms, and
+             a triggered scope.</p>
+          <div class="tags">
+            <span class="tag">FFT · PSD</span>
+            <span class="tag">SPECTROGRAM</span>
+            <span class="tag">CWT</span>
+            <span class="tag">MIC INPUT</span>
+          </div>
+        </div>
+      </a>
+
+      <div class="soon">
+        More to come — waves, modes, tuning &amp; measurement demos from the
+        vibration course notebooks.
+      </div>
+    </main>
+
+    <footer>
+      Built for undergraduate vibration teaching.
+      Signals are analysed entirely on your device — nothing is recorded or
+      uploaded. Source on
+      <a href="https://github.com/torebutlin/vibration_apps">GitHub</a>.
+    </footer>
+  </div>
+</body>
+</html>
