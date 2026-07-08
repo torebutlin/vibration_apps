@@ -252,6 +252,65 @@ export function initUI(state, engine, callbacks) {
   state.on('view', updateViewVisibility);
   updateViewVisibility();
 
+  // ---------- help overlay ----------
+  // Built from the data-tip attributes of whichever controls are visible,
+  // so it always explains exactly the current view/mode. This is the
+  // touch-friendly counterpart to the desktop hover tooltips.
+  const helpOverlay = $('help-overlay');
+  const helpBody = $('help-body');
+  const VIEW_NAMES = { spectrum: 'Spectrum', spectrogram: 'Spectrogram', scope: 'Scope' };
+
+  function buildHelp() {
+    $('help-title').textContent = `${VIEW_NAMES[state.get('view')]} — settings`;
+    helpBody.innerHTML = '';
+
+    const addSection = (title, items) => {
+      if (!items.length) return;
+      const h = document.createElement('h4');
+      h.textContent = title;
+      const dl = document.createElement('dl');
+      for (const [term, text] of items) {
+        const dt = document.createElement('dt');
+        dt.textContent = term;
+        const dd = document.createElement('dd');
+        dd.textContent = text;
+        dl.append(dt, dd);
+      }
+      helpBody.append(h, dl);
+    };
+
+    addSection('Plot', [
+      ['Zoom', 'Drag across the spectrum to zoom the frequency axis (pinch on touch). Double-click or double-tap to reset.'],
+      ['Readout', 'Move the pointer (or touch) over the plot for a frequency and level readout at the crosshair.'],
+      ['Run / pause', 'The Start button, or the space bar. Pausing freezes the display for discussion.'],
+    ]);
+
+    for (const group of document.querySelectorAll('#panel .group')) {
+      if (group.hidden) continue;
+      const items = [];
+      for (const row of group.querySelectorAll('.row')) {
+        if (row.hidden || row.closest('[hidden]')) continue;
+        const label = row.querySelector('label[data-tip]');
+        if (label) items.push([label.textContent, label.dataset.tip]);
+      }
+      addSection(group.querySelector('.group-title')?.textContent ?? '', items);
+    }
+  }
+
+  $('btn-help').addEventListener('click', () => {
+    buildHelp();
+    helpOverlay.hidden = false;
+  });
+  $('btn-help-close').addEventListener('click', () => {
+    helpOverlay.hidden = true;
+  });
+  helpOverlay.addEventListener('click', (e) => {
+    if (e.target === helpOverlay) helpOverlay.hidden = true;
+  });
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') helpOverlay.hidden = true;
+  });
+
   // ---------- panel drawer (mobile) ----------
   $('btn-panel').addEventListener('click', () => {
     document.body.classList.toggle('panel-open');

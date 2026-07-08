@@ -32,6 +32,7 @@
 
       <div id="topbar-right">
         <span class="lamp" id="lamp-clip">CLIP</span>
+        <button class="btn" id="btn-help" aria-label="Explain the current settings" title="What do these settings mean?">?</button>
         <button class="btn" id="btn-theme" aria-label="Toggle light/dark theme" title="Light / dark theme">☀</button>
         <button class="btn primary" id="btn-run" title="Space bar toggles run/pause">▶ Start</button>
         <button class="btn" id="btn-panel" aria-label="Toggle controls">☰</button>
@@ -64,7 +65,7 @@
       <div class="group" id="grp-source">
         <h3 class="group-title">Source</h3>
         <div class="row">
-          <label for="sel-source">Input</label>
+          <label for="sel-source" data-tip="A microphone (audio processing disabled for measurement), or a built-in demo signal — demos need no mic permission.">Input</label>
           <select id="sel-source"></select>
         </div>
         <div class="row" id="row-monitor" hidden>
@@ -290,6 +291,16 @@
         </p>
       </div>
     </aside>
+  </div>
+
+  <div id="help-overlay" hidden>
+    <div id="help-card" class="panel" role="dialog" aria-modal="true" aria-label="Settings help">
+      <header>
+        <h3 id="help-title">Settings</h3>
+        <button class="btn small" id="btn-help-close" aria-label="Close">✕</button>
+      </header>
+      <div id="help-body"></div>
+    </div>
   </div>
 
   <div id="toast" hidden></div>
