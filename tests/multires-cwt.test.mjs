@@ -73,6 +73,44 @@ test('multires PSD is continuous across boundaries for white noise', () => {
   }
 });
 
+test('multires linear averaging freezes every stage at the target', () => {
+  const fs = 48000;
+  const mr = new MultiResSpectrum({ baseSize: 1024, windowName: 'hann', sampleRate: fs });
+  mr.setAveraging('linear', { linearTarget: 5 });
+  const n = mr.maxSize;
+  // stage cadences are 1/2/4 frames, so the slowest stage needs 5*4 frames
+  for (let f = 0; f < 24; f++) mr.process(makeNoise(n, 0.1, 3 + f * 31), 0.05);
+  const prog = mr.linearProgress;
+  assert.ok(prog.done, `progress ${prog.count}/${prog.target}`);
+  const before = mr.stages.map((s) => Float64Array.from(s.avgPower));
+  for (let f = 0; f < 8; f++) mr.process(makeNoise(n, 0.1, 999 + f * 17), 0.05);
+  mr.stages.forEach((s, k) => {
+    assert.deepEqual(Array.from(s.avgPower), Array.from(before[k]), `stage ${k} frozen`);
+  });
+});
+
+test('multires peak hold retains maxima after the signal stops', () => {
+  const fs = 48000;
+  const mr = new MultiResSpectrum({ baseSize: 1024, windowName: 'hann', sampleRate: fs });
+  mr.setAveraging('off');
+  const n = mr.maxSize;
+  const tone = new Float32Array(n);
+  for (let i = 0; i < n; i++) tone[i] = 0.5 * Math.sin((2 * Math.PI * 100 * i) / fs);
+  for (let f = 0; f < 8; f++) mr.process(tone, 0.05);
+  for (let f = 0; f < 8; f++) mr.process(new Float32Array(n), 0.05);
+  const live = mr.segments('amplitude', false);
+  const held = mr.segments('amplitude', false, 'peak');
+  const peakOf = (segs) => {
+    let p = 0;
+    for (const seg of segs) for (const v of seg.values) p = Math.max(p, v);
+    return p;
+  };
+  assert.ok(peakOf(live) < 1e-6, 'live trace silent');
+  assert.ok(Math.abs(peakOf(held) - 0.5) < 0.08, `held peak ${peakOf(held)}`);
+  mr.resetPeakHold();
+  assert.ok(peakOf(mr.segments('amplitude', false, 'peak')) < 1e-6, 'reset clears hold');
+});
+
 test('CWT localizes a tone at the right scale with correct amplitude', () => {
   const fs = 48000;
   const cwt = new MorletCWT({

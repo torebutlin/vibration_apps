@@ -7,8 +7,11 @@
 // relative resolution df/f is continuous: crossing down a boundary swaps
 // to 4x finer bins at 1/4 the frequency.
 //
-// Each stage has its own window correction and exponential average; the
-// longer stages are recomputed at a reduced cadence to bound CPU cost.
+// Each stage has its own window correction, averaging state and peak hold;
+// the longer stages are recomputed at a reduced cadence to bound CPU cost.
+// Averaging modes mirror SpectrumProcessor (off / exponential / linear-N-
+// then-freeze); in linear mode the longest stage finishes last because it
+// updates least often.
 
 import { rfftMagSq } from './fft.js';
 import { getWindow } from './windows.js';
@@ -23,6 +26,8 @@ export class MultiResSpectrum {
   constructor({ baseSize = 4096, windowName = 'hann', sampleRate = 48000 } = {}) {
     this.sampleRate = sampleRate;
     this.expTimeConst = 0.5;
+    this.avgMode = 'exponential';
+    this.linearTarget = 16;
     this.configure(baseSize, windowName);
   }
 
@@ -44,12 +49,21 @@ export class MultiResSpectrum {
         windowed: new Float64Array(size),
         power: new Float64Array(nBins),
         avgPower: new Float64Array(nBins),
+        peakPower: new Float64Array(nBins),
         avgCount: 0,
         // Region covered by this stage: (fLow, fHigh]; stage 2 reaches 0
         fHigh: this.sampleRate / 2 / 4 ** k,
         fLow: k === 2 ? 0 : this.sampleRate / 2 / 4 ** (k + 1),
       };
     });
+    this.resetAverage();
+    this.resetPeakHold();
+  }
+
+  setAveraging(mode, { expTimeConst, linearTarget } = {}) {
+    this.avgMode = mode;
+    if (expTimeConst !== undefined) this.expTimeConst = expTimeConst;
+    if (linearTarget !== undefined) this.linearTarget = linearTarget;
     this.resetAverage();
   }
 
@@ -58,6 +72,18 @@ export class MultiResSpectrum {
       s.avgPower.fill(0);
       s.avgCount = 0;
     }
+  }
+
+  resetPeakHold() {
+    for (const s of this.stages) s.peakPower.fill(0);
+    this.peakValid = false;
+  }
+
+  /** Progress of the slowest stage (linear mode): {count, target, done}. */
+  get linearProgress() {
+    let count = Infinity;
+    for (const s of this.stages) count = Math.min(count, s.avgCount);
+    return { count, target: this.linearTarget, done: count >= this.linearTarget };
   }
 
   /** Longest window length needed from the ring buffer. */
@@ -73,17 +99,37 @@ export class MultiResSpectrum {
     for (const s of this.stages) {
       s.frame++;
       if (s.frame % s.cadence !== 0 && s.avgCount > 0) continue;
-      const n = s.size;
-      const offset = samples.length - n;
-      for (let i = 0; i < n; i++) s.windowed[i] = samples[offset + i] * s.w[i];
-      rfftMagSq(s.windowed, s.power);
-      const alpha = s.avgCount === 0
-        ? 1
-        : 1 - Math.exp((-dt * s.cadence) / Math.max(this.expTimeConst, 1e-3));
-      const { power, avgPower, nBins } = s;
-      for (let k = 0; k < nBins; k++) avgPower[k] += alpha * (power[k] - avgPower[k]);
-      s.avgCount++;
+      const linearDone = this.avgMode === 'linear' && s.avgCount >= this.linearTarget;
+      if (!linearDone) {
+        const n = s.size;
+        const offset = samples.length - n;
+        for (let i = 0; i < n; i++) s.windowed[i] = samples[offset + i] * s.w[i];
+        rfftMagSq(s.windowed, s.power);
+        const { power, avgPower, nBins } = s;
+        switch (this.avgMode) {
+          case 'off':
+            avgPower.set(power);
+            s.avgCount = 1;
+            break;
+          case 'linear': {
+            const c = s.avgCount;
+            for (let k = 0; k < nBins; k++) avgPower[k] = (avgPower[k] * c + power[k]) / (c + 1);
+            s.avgCount = c + 1;
+            break;
+          }
+          default: {
+            const alpha = s.avgCount === 0
+              ? 1
+              : 1 - Math.exp((-dt * s.cadence) / Math.max(this.expTimeConst, 1e-3));
+            for (let k = 0; k < nBins; k++) avgPower[k] += alpha * (power[k] - avgPower[k]);
+            s.avgCount++;
+          }
+        }
+      }
+      const { avgPower, peakPower, nBins } = s;
+      for (let k = 0; k < nBins; k++) if (avgPower[k] > peakPower[k]) peakPower[k] = avgPower[k];
     }
+    this.peakValid = true;
   }
 
   /**
@@ -92,13 +138,15 @@ export class MultiResSpectrum {
    * SpectrumProcessor.toDisplay.
    * @param {'amplitude'|'rms'|'psd'} quantity
    * @param {boolean} dB
+   * @param {'avg'|'peak'} source which power spectrum to convert
    * @returns {{binHz: number, startBin: number, values: Float32Array, fLow: number, fHigh: number}[]}
    */
-  segments(quantity, dB) {
+  segments(quantity, dB, source = 'avg') {
     const fs = this.sampleRate;
     const out = [];
     for (let k = 2; k >= 0; k--) {
       const s = this.stages[k];
+      const powerArr = source === 'peak' ? s.peakPower : s.avgPower;
       const binHz = fs / s.size;
       const startBin = k === 2 ? 0 : Math.ceil(s.fLow / binHz);
       const endBin = Math.min(Math.floor(s.fHigh / binHz), s.nBins - 1);
@@ -110,11 +158,11 @@ export class MultiResSpectrum {
         const edge = b === 0 || b === s.nBins - 1;
         let v;
         if (quantity === 'psd') {
-          v = s.avgPower[b] * psdScale;
+          v = powerArr[b] * psdScale;
           if (edge) v /= 2;
           values[b - startBin] = dB ? 10 * Math.log10(Math.max(v, 1e-30)) : v;
         } else {
-          v = cAmp * Math.sqrt(Math.max(s.avgPower[b], 0));
+          v = cAmp * Math.sqrt(Math.max(powerArr[b], 0));
           if (edge) v /= 2;
           else if (rms) v /= Math.SQRT2;
           values[b - startBin] = dB ? 20 * Math.log10(Math.max(v, 1e-15)) : v;

@@ -146,8 +146,8 @@
           <label for="sw-db" data-tip="Logarithmic amplitude in dB relative to full scale (dBFS). Off = linear amplitude.">dB scale</label>
           <span class="switch"><input type="checkbox" id="sw-db"><span class="track"></span></span>
         </div>
-        <div class="row">
-          <label for="sw-persist" data-tip="Fading history of the trace, like a phosphor oscilloscope screen — shows how the spectrum has been moving.">Persistence</label>
+        <div class="row" id="row-persist">
+          <label for="sw-persist" data-tip="Fading history of the trace, like a phosphor oscilloscope screen — shows how the spectrum has been moving. (Fixed resolution only.)">Persistence</label>
           <span class="switch"><input type="checkbox" id="sw-persist"><span class="track"></span></span>
         </div>
         <div class="row">
@@ -245,9 +245,10 @@
             </span>
           </div>
           <div class="row">
-            <label for="sel-cwtbpo" data-tip="Wavelet centre frequencies per octave — the vertical resolution of the scaleogram. More = smoother but slower to compute.">Bins / octave</label>
+            <label for="sel-cwtbpo" data-tip="How densely the frequency axis is sampled with wavelets. The true resolution is set by Wavelet Q — beyond ~32/oct you mostly pay CPU for a smoother picture.">Bins / octave</label>
             <select id="sel-cwtbpo">
               <option>8</option><option>12</option><option>16</option><option>24</option>
+              <option>32</option><option>48</option><option>64</option>
             </select>
           </div>
           <div class="row">

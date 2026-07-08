@@ -141,6 +141,13 @@ export function initUI(state, engine, callbacks) {
   bindSwitch('sw-persist', 'persistence');
   bindSelect('sel-peaklabels', 'peakLabels', (v) => parseInt(v, 10));
 
+  function updatePersistRow() {
+    $('row-persist').hidden = state.get('resMode') === 'multires';
+  }
+
+  state.on('resMode', updatePersistRow);
+  updatePersistRow();
+
   // ---------- frequency axis ----------
   bindSeg('fscale', 'freqScale');
   const selFrange = $('sel-frange');

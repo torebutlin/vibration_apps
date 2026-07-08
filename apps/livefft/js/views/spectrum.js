@@ -51,11 +51,15 @@ export class SpectrumView {
 
   #applyAveraging() {
     const s = this.state;
-    this.proc.setAveraging(s.get('avgMode'), {
+    const opts = {
       expTimeConst: s.get('expTimeConst'),
       linearTarget: s.get('linearTarget'),
+    };
+    this.proc.setAveraging(s.get('avgMode'), opts);
+    this.multi.setAveraging(s.get('avgMode'), {
+      ...opts,
+      expTimeConst: Math.max(opts.expTimeConst, 0.1),
     });
-    this.multi.expTimeConst = Math.max(s.get('expTimeConst'), 0.1);
   }
 
   setSampleRate(fs) {
@@ -72,6 +76,7 @@ export class SpectrumView {
 
   resetPeakHold() {
     this.proc.resetPeakHold();
+    this.multi.resetPeakHold();
   }
 
   clearPersistence() {
@@ -82,6 +87,7 @@ export class SpectrumView {
 
   get avgProgress() {
     if (this.state.get('avgMode') !== 'linear') return null;
+    if (this.state.get('resMode') === 'multires') return this.multi.linearProgress;
     return { count: this.proc.avgCount, target: this.proc.linearTarget, done: this.proc.linearDone };
   }
 
@@ -140,15 +146,18 @@ export class SpectrumView {
 
     // Peak-hold display is computed up front so the auto range can include
     // it — the held trace (and its labels) must never sit off-scale.
-    const peakHoldActive = s.get('peakHold') && !multires && this.proc.peakValid;
+    const peakHoldActive = s.get('peakHold') && (multires ? this.multi.peakValid : this.proc.peakValid);
+    let peakSegments = null;
     if (peakHoldActive) {
-      this.proc.toDisplay(this.proc.peakPower, this.peakDisplay, quantity, dB);
+      if (multires) {
+        peakSegments = this.multi.segments(quantity, dB, 'peak');
+      } else {
+        this.proc.toDisplay(this.proc.peakPower, this.peakDisplay, quantity, dB);
+        peakSegments = [{ binHz: this.proc.binHz, startBin: 0, values: this.peakDisplay }];
+      }
     }
 
-    const rangeArrays = [...segments];
-    if (peakHoldActive) {
-      rangeArrays.push({ binHz: this.proc.binHz, startBin: 0, values: this.peakDisplay });
-    }
+    const rangeArrays = peakSegments ? [...segments, ...peakSegments] : segments;
     const scanPeak = (init) => {
       let peak = init;
       for (const seg of rangeArrays) {
@@ -217,7 +226,7 @@ export class SpectrumView {
 
     // peak hold trace (display values computed above for the auto range)
     if (peakHoldActive) {
-      this.#stroke(ctx, [{ binHz: this.proc.binHz, startBin: 0, values: this.peakDisplay }], th.tracePeak, 1);
+      this.#stroke(ctx, peakSegments, th.tracePeak, 1);
     }
 
     // main trace
