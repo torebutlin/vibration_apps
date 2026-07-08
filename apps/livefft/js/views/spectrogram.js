@@ -17,6 +17,12 @@ import { Axes, fmtHz, plotTheme } from '../../../../shared/js/plot/axes.js';
 const COLS = 1024;
 const ROWS = 512;
 
+// In CWT mode the display is pinned a fixed margin behind real time (on
+// top of the wavelet latency) so worker batches always land before their
+// columns reach the right edge — the edge stays filled instead of showing
+// a hovering "not yet computed" gap.
+const CWT_DISPLAY_MARGIN = 0.45; // seconds
+
 export class SpectrogramView {
   constructor(state) {
     this.state = state;
@@ -349,10 +355,18 @@ export class SpectrogramView {
 
     // Smooth scrolling: shift the image left by the audio time elapsed
     // since the newest written column, so the display glides continuously
-    // even when columns arrive in batches (CWT worker results).
+    // even when columns arrive in batches (CWT worker results). In CWT
+    // mode the whole display is additionally delayed by a fixed margin so
+    // freshly computed columns overhang the right edge and scroll into
+    // view — the edge stays filled.
     let offsetPx = 0;
-    if (this.newestColTotal > 0 && this.curTotal > this.newestColTotal) {
-      const pendingCols = (this.curTotal - this.newestColTotal) / this.colPeriodSamples;
+    if (this.newestColTotal > 0) {
+      // total display delay: wavelet latency (already in the column
+      // timestamps) plus the batch margin
+      const delaySamples = this.isCwt
+        ? (this.cwtLatency + CWT_DISPLAY_MARGIN) * this.sampleRate
+        : 0;
+      const pendingCols = (this.curTotal - this.newestColTotal - delaySamples) / this.colPeriodSamples;
       offsetPx = Math.min((pendingCols / COLS) * r.w, r.w * 0.3);
     }
 
@@ -371,11 +385,13 @@ export class SpectrogramView {
     if (wNew > 0) {
       ctx.drawImage(this.img, 0, 0, wNew, ROWS, x0 + (wOld / COLS) * r.w, r.y, (wNew / COLS) * r.w, r.h);
     }
-    if (offsetPx > 0) {
-      // not-yet-computed strip at the right: paint as silence, not page bg
+    if (offsetPx !== 0) {
+      // uncovered strip (right: not yet computed; left: image shifted
+      // right by the display delay): paint as silence, not page bg
       const lut = this.lut;
       ctx.fillStyle = `rgb(${lut[0]}, ${lut[1]}, ${lut[2]})`;
-      ctx.fillRect(r.x + r.w - offsetPx, r.y, offsetPx, r.h);
+      if (offsetPx > 0) ctx.fillRect(r.x + r.w - offsetPx, r.y, offsetPx, r.h);
+      else ctx.fillRect(r.x, r.y, -offsetPx, r.h);
     }
     ctx.restore();
 
@@ -396,7 +412,7 @@ export class SpectrogramView {
     ctx.textBaseline = 'top';
     const range = `${s.get('sgFloorDb')}…${s.get('sgCeilDb')} dBFS`;
     const note = this.isCwt && this.cwtLatency
-      ? `CWT · display −${this.cwtLatency.toFixed(2)} s · ${range}`
+      ? `CWT · display −${(this.cwtLatency + CWT_DISPLAY_MARGIN).toFixed(2)} s · ${range}`
       : range;
     ctx.fillText(note, r.x + r.w - 4, r.y + 4);
 

@@ -95,7 +95,7 @@
           </select>
         </div>
         <div class="row" data-views="spectrum">
-          <label data-tip="Fixed: one FFT length everywhere. Multi-res: stitches three FFT lengths so frequencies below fs/32 get 16× finer resolution (at the cost of slower response there).">Resolution</label>
+          <label data-tip="Fixed: one FFT length everywhere. Multi-res: three stitched lengths — N, 4N, 16N from the FFT size (N capped at 8192) — with regions split at fs/8 and fs/32, so Δf/f matches across each boundary. Low frequencies get up to 16× finer bins at the cost of slower response there.">Resolution</label>
           <nav class="seg">
             <input type="radio" name="resmode" value="standard" id="res-standard">
             <label for="res-standard">Fixed</label>

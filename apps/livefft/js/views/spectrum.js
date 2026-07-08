@@ -291,10 +291,13 @@ export class SpectrumView {
     // trace legend (top-left) — identifies average / live / peak hold
     if (legend.length > 1 || s.get('peakHold')) this.#drawLegend(ctx, legend, th);
 
-    // peak labels (drawn over frame edge allowed)
+    // peak labels follow the slowest-changing trace: the held maxima when
+    // peak hold is on, otherwise the displayed (averaged or live) spectrum
     this.dominantPeak = null;
     const nLabels = s.get('peakLabels');
-    if (nLabels > 0) this.#drawPeakLabels(ctx, segments, dB, nLabels, th);
+    if (nLabels > 0) {
+      this.#drawPeakLabels(ctx, peakHoldActive ? peakSegments : segments, dB, nLabels, th);
+    }
 
     // rubber band
     if (rubberBand) {
