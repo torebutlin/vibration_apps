@@ -42,7 +42,7 @@ export class PlotInteraction {
 
   #down(e) {
     const p = this.#pos(e);
-    this.el.setPointerCapture(e.pointerId);
+    try { this.el.setPointerCapture(e.pointerId); } catch { /* synthetic pointer */ }
     this.pointers.set(e.pointerId, p);
 
     if (this.pointers.size === 2) {

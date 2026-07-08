@@ -208,7 +208,7 @@ function frame(now) {
 requestAnimationFrame(frame);
 
 // Debug/testing handle (also handy in the browser console)
-window.__livefft = { engine, state, views };
+window.__livefft = { engine, state, views, interaction };
 
 // ---------- service worker ----------
 

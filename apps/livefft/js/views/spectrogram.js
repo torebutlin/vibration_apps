@@ -12,7 +12,7 @@
 import { rfftMagSq } from '../../../../shared/js/dsp/fft.js';
 import { getWindow } from '../../../../shared/js/dsp/windows.js';
 import { getColormap } from '../../../../shared/js/plot/colormap.js';
-import { Axes } from '../../../../shared/js/plot/axes.js';
+import { Axes, fmtHz } from '../../../../shared/js/plot/axes.js';
 
 const COLS = 1024;
 const ROWS = 512;
@@ -323,8 +323,8 @@ export class SpectrogramView {
     this.axes.draw(ctx, {
       xLabel: 'time · s',
       yLabel: 'frequency · Hz',
-      xFmt: (v) => (v === 0 ? '0' : v.toFixed(0)),
-      yFmt: undefined,
+      xFmt: (v) => (Math.abs(v % 1) < 1e-6 ? v.toFixed(0) : v.toFixed(1)),
+      yFmt: fmtHz,
       theme: { grid: 'transparent', gridStrong: 'transparent' },
     });
 
