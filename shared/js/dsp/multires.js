@@ -100,11 +100,13 @@ export class MultiResSpectrum {
       s.frame++;
       if (s.frame % s.cadence !== 0 && s.avgCount > 0) continue;
       const linearDone = this.avgMode === 'linear' && s.avgCount >= this.linearTarget;
+      // instantaneous spectrum always (drives the live ghost trace);
+      // only the average freezes when a linear measurement completes
+      const n = s.size;
+      const offset = samples.length - n;
+      for (let i = 0; i < n; i++) s.windowed[i] = samples[offset + i] * s.w[i];
+      rfftMagSq(s.windowed, s.power);
       if (!linearDone) {
-        const n = s.size;
-        const offset = samples.length - n;
-        for (let i = 0; i < n; i++) s.windowed[i] = samples[offset + i] * s.w[i];
-        rfftMagSq(s.windowed, s.power);
         const { power, avgPower, nBins } = s;
         switch (this.avgMode) {
           case 'off':
@@ -132,13 +134,40 @@ export class MultiResSpectrum {
     this.peakValid = true;
   }
 
+  #sourceArray(s, source) {
+    return source === 'peak' ? s.peakPower : source === 'inst' ? s.power : s.avgPower;
+  }
+
+  #convertRange(s, powerArr, startBin, endBin, quantity, dB) {
+    const fs = this.sampleRate;
+    const values = new Float32Array(endBin - startBin + 1);
+    const cAmp = 2 / (s.size * s.coherentGain);
+    const psdScale = 2 / (fs * s.size * s.noiseGain);
+    const rms = quantity === 'rms';
+    for (let b = startBin; b <= endBin; b++) {
+      const edge = b === 0 || b === s.nBins - 1;
+      let v;
+      if (quantity === 'psd') {
+        v = powerArr[b] * psdScale;
+        if (edge) v /= 2;
+        values[b - startBin] = dB ? 10 * Math.log10(Math.max(v, 1e-30)) : v;
+      } else {
+        v = cAmp * Math.sqrt(Math.max(powerArr[b], 0));
+        if (edge) v /= 2;
+        else if (rms) v /= Math.SQRT2;
+        values[b - startBin] = dB ? 20 * Math.log10(Math.max(v, 1e-15)) : v;
+      }
+    }
+    return values;
+  }
+
   /**
    * Stitched display segments, low frequency first. Each segment holds the
    * bins of one stage that fall inside its region, converted like
    * SpectrumProcessor.toDisplay.
    * @param {'amplitude'|'rms'|'psd'} quantity
    * @param {boolean} dB
-   * @param {'avg'|'peak'} source which power spectrum to convert
+   * @param {'avg'|'peak'|'inst'} source which power spectrum to convert
    * @returns {{binHz: number, startBin: number, values: Float32Array, fLow: number, fHigh: number}[]}
    */
   segments(quantity, dB, source = 'avg') {
@@ -146,29 +175,63 @@ export class MultiResSpectrum {
     const out = [];
     for (let k = 2; k >= 0; k--) {
       const s = this.stages[k];
-      const powerArr = source === 'peak' ? s.peakPower : s.avgPower;
+      const powerArr = this.#sourceArray(s, source);
       const binHz = fs / s.size;
       const startBin = k === 2 ? 0 : Math.ceil(s.fLow / binHz);
       const endBin = Math.min(Math.floor(s.fHigh / binHz), s.nBins - 1);
-      const values = new Float32Array(endBin - startBin + 1);
-      const cAmp = 2 / (s.size * s.coherentGain);
-      const psdScale = 2 / (fs * s.size * s.noiseGain);
-      const rms = quantity === 'rms';
-      for (let b = startBin; b <= endBin; b++) {
-        const edge = b === 0 || b === s.nBins - 1;
-        let v;
-        if (quantity === 'psd') {
-          v = powerArr[b] * psdScale;
-          if (edge) v /= 2;
-          values[b - startBin] = dB ? 10 * Math.log10(Math.max(v, 1e-30)) : v;
-        } else {
-          v = cAmp * Math.sqrt(Math.max(powerArr[b], 0));
-          if (edge) v /= 2;
-          else if (rms) v /= Math.SQRT2;
-          values[b - startBin] = dB ? 20 * Math.log10(Math.max(v, 1e-15)) : v;
+      out.push({
+        binHz,
+        startBin,
+        values: this.#convertRange(s, powerArr, startBin, endBin, quantity, dB),
+        fLow: s.fLow,
+        fHigh: s.fHigh,
+      });
+    }
+    return out;
+  }
+
+  /**
+   * Echo segments: each stage's estimate continued a little way past its
+   * region boundary (every stage is a full-band FFT, so the data exists) —
+   * drawn faded to guide the eye across the resolution discontinuities.
+   * fadeFromHz/fadeToHz give the fade direction (boundary -> vanishing).
+   * @param {number} factor how far past the boundary, in frequency ratio
+   */
+  extensions(quantity, dB, factor = 1.6, source = 'avg') {
+    const fs = this.sampleRate;
+    const out = [];
+    for (let k = 2; k >= 0; k--) {
+      const s = this.stages[k];
+      const powerArr = this.#sourceArray(s, source);
+      const binHz = fs / s.size;
+      if (k >= 1) {
+        // continue upward past fHigh
+        const from = Math.ceil(s.fHigh / binHz);
+        const to = Math.min(Math.floor((s.fHigh * factor) / binHz), s.nBins - 1);
+        if (to >= from) {
+          out.push({
+            binHz,
+            startBin: from,
+            values: this.#convertRange(s, powerArr, from, to, quantity, dB),
+            fadeFromHz: s.fHigh,
+            fadeToHz: s.fHigh * factor,
+          });
         }
       }
-      out.push({ binHz, startBin, values, fLow: s.fLow, fHigh: s.fHigh });
+      if (k <= 1) {
+        // continue downward past fLow
+        const from = Math.max(Math.ceil(s.fLow / factor / binHz), 1);
+        const to = Math.floor(s.fLow / binHz);
+        if (to >= from) {
+          out.push({
+            binHz,
+            startBin: from,
+            values: this.#convertRange(s, powerArr, from, to, quantity, dB),
+            fadeFromHz: s.fLow,
+            fadeToHz: s.fLow / factor,
+          });
+        }
+      }
     }
     return out;
   }

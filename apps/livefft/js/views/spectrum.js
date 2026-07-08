@@ -10,6 +10,13 @@ import { Axes, fmtHz, plotTheme } from '../../../../shared/js/plot/axes.js';
 // (instantaneous periodogram); averaging turns it into a Welch estimate.
 const QUANTITY = 'psd';
 
+function hexToRgba(hex, alpha) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return hex;
+  const n = parseInt(m[1], 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+}
+
 export class SpectrumView {
   constructor(state) {
     this.state = state;
@@ -21,8 +28,12 @@ export class SpectrumView {
     this.peakDisplay = null;
     this.instDisplay = null;
     this.persistCanvas = null;
-    this.autoTop = -20;         // smoothed auto range (dB)
-    this.autoBottom = -100;
+    // auto-range state: expand instantly, hold while data is near the top,
+    // release slowly (see #trackAutoRange)
+    this.autoTop = -20;         // dB mode ceiling
+    this.autoMaxLin = 1;        // linear mode ceiling
+    this.lastNearTop = 0;
+    this.lastRangeTick = 0;
     this.dominantPeak = null;   // {freq, db} for the header readout
     this.#configure();
 
@@ -174,20 +185,22 @@ export class SpectrumView {
     let yMax;
     if (dB) {
       if (s.get('ampAuto')) {
+        // required ceiling: 6 dB headroom, quantized to 5 dB steps
         const peak = scanPeak(-160);
-        const targetTop = Math.min(Math.ceil((peak + 8) / 10) * 10, 20);
-        this.autoTop += 0.15 * (targetTop - this.autoTop);
-        this.autoBottom = this.autoTop - 110;
-        yMin = this.autoBottom;
+        const required = Math.max(Math.min(Math.ceil((peak + 6) / 5) * 5, 20), -60);
+        this.autoTop = this.#trackAutoRange(this.autoTop, required, 12);
         yMax = this.autoTop;
+        yMin = this.autoTop - 110;
       } else {
         yMin = s.get('ampMin');
         yMax = s.get('ampMax');
       }
     } else {
       const peak = scanPeak(0);
+      const required = Math.max(peak * 1.15, 1e-12);
+      this.autoMaxLin = this.#trackAutoRange(this.autoMaxLin, required, this.autoMaxLin * 0.5);
       yMin = 0;
-      yMax = peak > 0 ? peak * 1.15 : 1;
+      yMax = this.autoMaxLin;
     }
     this.axes.setY(yMin, yMax, false);
 
@@ -217,11 +230,15 @@ export class SpectrumView {
 
     const legend = [];
 
-    // instantaneous ghost trace (standard mode, averaging on)
-    const showGhost = !multires && s.get('avgMode') !== 'off';
+    // instantaneous ghost trace (averaging on)
+    const showGhost = s.get('avgMode') !== 'off';
     if (showGhost) {
-      this.proc.toDisplay(this.proc.power, this.instDisplay, quantity, dB);
-      this.#stroke(ctx, [{ binHz: this.proc.binHz, startBin: 0, values: this.instDisplay }], th.traceGhost, 1);
+      if (multires) {
+        this.#stroke(ctx, this.multi.segments(quantity, dB, 'inst'), th.traceGhost, 1);
+      } else {
+        this.proc.toDisplay(this.proc.power, this.instDisplay, quantity, dB);
+        this.#stroke(ctx, [{ binHz: this.proc.binHz, startBin: 0, values: this.instDisplay }], th.traceGhost, 1);
+      }
     }
 
     // peak hold trace (display values computed above for the auto range)
@@ -231,6 +248,23 @@ export class SpectrumView {
 
     // main trace
     this.#stroke(ctx, segments, th.traceMain, 1.6);
+
+    // multires echo lines: each stage carried past its boundary, fading
+    // out, so the eye can follow the level across the discontinuities
+    if (multires) {
+      for (const e of this.multi.extensions(quantity, dB, 1.6)) {
+        const x0 = this.axes.xToPx(e.fadeFromHz);
+        const x1 = this.axes.xToPx(e.fadeToHz);
+        if (!isFinite(x0) || !isFinite(x1) || Math.abs(x1 - x0) < 1) continue;
+        const grad = ctx.createLinearGradient(x0, 0, x1, 0);
+        grad.addColorStop(0, hexToRgba(th.traceMain, 0.35));
+        grad.addColorStop(1, hexToRgba(th.traceMain, 0));
+        ctx.strokeStyle = grad;
+        ctx.lineWidth = 1;
+        this.#tracePath(ctx, e);
+        ctx.stroke();
+      }
+    }
 
     legend.push({ color: th.traceMain, label: s.get('avgMode') === 'off' ? 'live' : 'average' });
     if (showGhost) legend.push({ color: th.traceGhost, label: 'live' });
@@ -276,6 +310,29 @@ export class SpectrumView {
     if (hover && this.axes.inRect(hover.x, hover.y)) {
       this.#drawCrosshair(ctx, hover, segments, dB, th);
     }
+  }
+
+  /**
+   * Attack / hold / release for the auto range ceiling:
+   *  - never clip: expand to `required` immediately;
+   *  - hold while the data peak stays within `holdBand` of the ceiling;
+   *  - after 1.5 s below that, settle down slowly (tau 2.5 s) so the data
+   *    refills the plot without the axis jumping around.
+   */
+  #trackAutoRange(current, required, holdBand) {
+    const now = performance.now();
+    const dt = Math.min((now - this.lastRangeTick) / 1000, 0.1);
+    this.lastRangeTick = now;
+    if (required >= current) {
+      this.lastNearTop = now;
+      return required;
+    }
+    if (required > current - holdBand) {
+      this.lastNearTop = now;
+      return current;
+    }
+    if (now - this.lastNearTop < 1500) return current;
+    return current + (1 - Math.exp(-dt / 2.5)) * (required - current);
   }
 
   #drawLegend(ctx, entries, th) {

@@ -3,7 +3,7 @@
 // latest version when online), falling back to the cache offline.
 // Bump CACHE_VERSION when shipping changes to force old caches out.
 
-const CACHE_VERSION = 'livefft-v5';
+const CACHE_VERSION = 'livefft-v6';
 
 const PRECACHE = [
   './',

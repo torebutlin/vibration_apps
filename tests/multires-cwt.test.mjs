@@ -111,6 +111,30 @@ test('multires peak hold retains maxima after the signal stops', () => {
   assert.ok(peakOf(mr.segments('amplitude', false, 'peak')) < 1e-6, 'reset clears hold');
 });
 
+test('multires extensions continue each stage past its boundary', () => {
+  const fs = 48000;
+  const mr = new MultiResSpectrum({ baseSize: 1024, windowName: 'hann', sampleRate: fs });
+  const n = mr.maxSize;
+  for (let f = 0; f < 8; f++) mr.process(makeNoise(n, 0.1, 5 + f * 13), 0.05);
+  const ext = mr.extensions('psd', false, 1.6);
+  // stages 1,2 extend up; stages 0,1 extend down => 4 pieces
+  assert.equal(ext.length, 4);
+  const expected = (2 * 0.1 * 0.1) / fs;
+  for (const e of ext) {
+    assert.ok(e.values.length > 0, 'extension has bins');
+    const lo = Math.min(e.fadeFromHz, e.fadeToHz);
+    const hi = Math.max(e.fadeFromHz, e.fadeToHz);
+    const f0 = e.startBin * e.binHz;
+    const f1 = (e.startBin + e.values.length - 1) * e.binHz;
+    assert.ok(f0 >= lo - e.binHz && f1 <= hi + e.binHz, `bins ${f0}-${f1} within ${lo}-${hi}`);
+    // white-noise PSD level continues correctly past the boundary
+    let mean = 0;
+    for (const v of e.values) mean += v;
+    mean /= e.values.length;
+    assert.ok(Math.abs(mean - expected) / expected < 0.35, `level ${mean} vs ${expected}`);
+  }
+});
+
 test('CWT localizes a tone at the right scale with correct amplitude', () => {
   const fs = 48000;
   const cwt = new MorletCWT({
