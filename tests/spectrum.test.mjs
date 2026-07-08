@@ -9,12 +9,14 @@ function makeSine(n, fs, freq, amp, phase = 0) {
   return s;
 }
 
-// Deterministic gaussian-ish noise via sum of uniforms
+// Deterministic gaussian-ish noise via sum of uniforms (mulberry32 PRNG)
 function makeNoise(n, sigma, seedStart = 42) {
-  let seed = seedStart;
+  let a = seedStart | 0;
   const rand = () => {
-    seed = (seed * 1103515245 + 12345) % 2147483648;
-    return seed / 2147483648;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
   const s = new Float32Array(n);
   for (let i = 0; i < n; i++) {
