@@ -236,7 +236,8 @@ body.fullview #plot-wrap { border: none; border-radius: 0; }
   #stage { padding: 0.6rem 0.6rem 0.3rem; }
   #brand-sub { display: none; }
   #brand-name { font-size: 1rem; }
-  #topbar { gap: 0.6rem; padding: 0.45rem 0.6rem; }
+  #topbar { gap: 0.6rem; padding: 0.45rem 0.6rem; flex-wrap: wrap; }
+  #topbar-right { flex-wrap: wrap; row-gap: 0.4rem; }
   #btn-play { min-width: 4.2rem; }
   #help-overlay { padding: 0; }
   #help-card { width: 100%; height: 100%; max-height: none; border-radius: 0; border: none; }

@@ -37,7 +37,8 @@ export function createDemoShell({
           <button class="btn" id="btn-help" aria-label="Explain this demo" title="What am I looking at?">?</button>
           <button class="btn" id="btn-full" aria-label="Full screen" title="Full screen — hide all controls">⤢</button>
           <button class="btn" id="btn-theme" aria-label="Toggle light/dark theme" title="Light / dark theme">☀︎</button>
-          <button class="btn primary" id="btn-play" title="Space bar toggles play/pause">❚❚ Pause</button>
+          <button class="btn" id="btn-reset" aria-label="Reset to initial state" title="Back to the initial state, paused">⟲</button>
+          <button class="btn primary" id="btn-play" title="Space bar toggles play/pause">▶ Play</button>
           <button class="btn" id="btn-panel" aria-label="Toggle controls">☰</button>
         </div>
       </header>
@@ -260,23 +261,31 @@ export function createDemoShell({
   requestAnimationFrame(loop);
 
   // ---------- top-bar extras ----------
+  $('btn-reset').addEventListener('click', () => {
+    simTime = 0;
+    setPlaying(false);
+  });
+
   if (speedControl) {
-    const wrap = document.createElement('nav');
-    wrap.className = 'seg';
+    const wrap = document.createElement('span');
+    wrap.style.cssText = 'display: flex; align-items: center; gap: 0.4rem;';
     wrap.title = 'Animation speed';
-    const name = 'shellspeed';
-    for (const [v, lab] of [[0.25, '¼×'], [1, '1×'], [3, '3×']]) {
-      const input = document.createElement('input');
-      input.type = 'radio';
-      input.name = name;
-      input.id = `${name}-${v}`;
-      input.checked = v === 1;
-      const l = document.createElement('label');
-      l.htmlFor = input.id;
-      l.textContent = lab;
-      input.addEventListener('change', () => { speed = v; });
-      wrap.append(input, l);
-    }
+    const input = document.createElement('input');
+    input.type = 'range';
+    input.min = 0.1;
+    input.max = 2;
+    input.step = 0.05;
+    input.value = 1;
+    input.style.cssText = 'width: 5.5rem;';
+    const ro = document.createElement('span');
+    ro.className = 'readout';
+    ro.style.cssText = 'min-width: 3.2rem;';
+    ro.textContent = '1.00×';
+    input.addEventListener('input', () => {
+      speed = parseFloat(input.value);
+      ro.textContent = `${speed.toFixed(2)}×`;
+    });
+    wrap.append(input, ro);
     $('topbar-right').insertBefore(wrap, $('btn-help'));
   }
 
@@ -359,6 +368,7 @@ export function createDemoShell({
   shell.setPlaying = setPlaying;
   shell.resetTime = () => { simTime = 0; };
   shell.isPlaying = () => playing;
-  setPlaying(true);
+  // start paused at the initial state so the lecturer can set the scene
+  setPlaying(false);
   return shell;
 }

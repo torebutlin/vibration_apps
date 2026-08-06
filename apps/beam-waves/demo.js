@@ -22,7 +22,7 @@ const shell = createDemoShell({
   course: '3C6 · S5',
   subtitle: 'evanescent and travelling solutions',
   about:
-    'The beam equation is fourth order in x, so a given frequency has FOUR wave solutions, not two: travelling waves e^{∓ikx} moving right/left, plus evanescent near-fields e^{∓kx} that oscillate in place while decaying with distance. Near-fields matter close to boundaries and drivers; far away only the travelling pair survives. Note the evanescent pair never progresses — every point moves in phase.',
+    'The beam equation is fourth order in x, so a given frequency has FOUR wave solutions, not two: travelling waves e^{∓ikx} moving right/left, plus evanescent near-fields e^{∓kx} that oscillate in place while decaying with distance. Near-fields matter close to boundaries and drivers; far away only the travelling pair survives. Note the evanescent pair never progresses — every point moves in phase. (e^{+kx} is drawn scaled to ±1 at x = L: it is the near-field of a boundary on the right, the mirror twin of e^{−kx}.)',
 });
 
 shell.group('Wave');
@@ -39,7 +39,9 @@ shell.finePrint(
 
 const panels = [
   { title: 'e⁻ᵏˣ', shape: (x, k, ph) => Math.exp(-k * x) * Math.cos(ph), evan: true },
-  { title: 'e⁺ᵏˣ', shape: (x, k, ph) => Math.exp(k * x) * Math.cos(ph), evan: true },
+  // scaled by e^{-kL} so it reads ±1 at the RIGHT edge: the near-field
+  // attached to a boundary on the right, mirror twin of e^{-kx}
+  { title: 'e⁺ᵏˣ', shape: (x, k, ph) => Math.exp(k * (x - 1)) * Math.cos(ph), evan: true },
   { title: 'e⁻ⁱᵏˣ', shape: (x, k, ph) => Math.cos(ph - k * x), evan: false },
   { title: 'e⁺ⁱᵏˣ', shape: (x, k, ph) => Math.cos(ph + k * x), evan: false },
 ];
