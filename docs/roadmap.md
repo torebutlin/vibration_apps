@@ -1,7 +1,20 @@
 # Vibration Apps — roadmap
 
-Date: 2026-08-06. Source material: `context/3c6/` (16 notebooks + 1 .py,
-sessions S2–S7) and `context/4c6/` (20 notebooks + 1 .m), fully inventoried.
+Date: 2026-08-06 (staged plan agreed with Tore). Source material:
+`context/3c6/` (16 notebooks + 1 .py, sessions S2–S7) and `context/4c6/`
+(20 notebooks + 1 .m), fully inventoried.
+
+Ground rules from Tore:
+
+- **pydvma stays its own maintained repo** — link to it (README/landing),
+  never modify it here. The instruments are independent web
+  reimplementations of the workflows, not pydvma ports.
+- **Demos stay standalone per lecture.** Each demo is linked from a
+  specific lecture, so prefer separate small apps over merged
+  multi-concept ones, even where concepts connect. Consolidation applies
+  only to true duplicates.
+- New apps ship as unlisted drafts (`"public": false` in apps.json);
+  Tore flips them public.
 
 ## Two archetypes
 
@@ -100,16 +113,41 @@ ideas are absorbed into I5 and D8).
 - `shared/js/audio/` — additive-synthesis helper with envelopes (I5, D1,
   D15); capture/record buffer with pretrigger (I2, I4, I3).
 
-## Suggested build order
+## Staged plan
 
-1. **Demo shell + quick wins** (all closed-form): D2, D3, D5, D8, D13 —
-   five demos that prove the shell across both courses.
-2. **Sound**: I5 tone lab, then D1 plucked string (shell + audio synth).
-3. **Instruments**: I4 reverb meter (small), then I3 FRF analyzer (the big
-   one), absorbing I2's capture machinery on the way (I2 may ship as a
-   by-product).
-4. **Modal testing set**: D14 beam explorer, D12 circle fit, D6, D7, D11.
-5. **Specialist tail**: D15, D16, D17 (Bessel), D9, D10 (complex eig), D18.
+Each stage is roughly one working session; every app lands as a draft
+(gallery via `?drafts=1`), Tore tests on his devices and flips
+`"public": true` when happy. D2/D3 keep the beating variant as a preset
+within the dispersion demo (same lecture), not a separate app.
 
-Each app: draft flag on, verify on desktop + phone, then Tore flips
-`"public": true` in `apps.json`.
+**Stage 1 — demo shell + wave demos (3C6 S4/S5).** Build
+`shared/js/demo-shell/` (header, canvas, param panel from theme controls,
+play/pause animation loop, theming, draft-PWA plumbing) and prove it with
+three standalone demos: D2 d'Alembert, D3 dispersion & group velocity
+(with beating preset), D4 beam wave types.
+
+**Stage 2 — slider quick wins (both courses).** D5 discrete vs continuous,
+D6 modal-sum convergence, D8 damping treatment designer, D13 interlacing.
+Adds the shared scalar root finder only if needed.
+
+**Stage 3 — reverb meter (I4, elevated: confirmed want).** Clap-triggered
+capture → waveform + Schroeder backward integral + fitted slopes as the
+central visual, big RT60/EDT/T20/T30 readouts, phone-first layout. Builds
+the shared capture/pretrigger machinery (seed of I2).
+
+**Stage 4 — sound apps.** I5 tone lab (scope to confirm at the time:
+notes-vs-clangs, temperament beats, stiff-string inharmonicity presets),
+D1 plucked string with audio.
+
+**Stage 5 — modal testing set.** D14 beam explorer (free-free +
+cantilever), D12 circle fit, D7 hammer pulse & filters (adds the IIR
+helper), D11 envelope methods.
+
+**Stage 6 — FRF analyzer (I3, flagship).** Stepped sine / chirp / noise
+excitation, H1 + coherence, averaging, loop-latency calibration; presets
+for effect-of-mass (S7) and Helmholtz measurement. Decide here whether a
+standalone signal logger (I2) is still needed or is absorbed.
+
+**Stage 7 — acoustics + specialist tail.** D15 room modes/Schroeder, D16
+Helmholtz calculator, D17 membranes & Bessel, D9 friction damping, D10
+complex modes (complex eigensolver), D18 ABH taper.

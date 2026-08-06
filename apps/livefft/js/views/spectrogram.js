@@ -222,11 +222,12 @@ export class SpectrogramView {
         this.#buildCwtRowMap();
       } else if (msg.type === 'result') {
         this.workerBusy = false;
-        // decaying max of the interval between batches drives the margin
+        // Ratchet: the margin only ever grows within a session, so once it
+        // has adapted the display time evolves strictly linearly (no
+        // breathing). Settings changes rebuild the worker and reset it.
         const now = performance.now() / 1000;
         if (this.lastResultAt) {
-          const gap = now - this.lastResultAt;
-          this.batchGapMax = Math.max(gap, this.batchGapMax * 0.97);
+          this.batchGapMax = Math.max(now - this.lastResultAt, this.batchGapMax);
         }
         this.lastResultAt = now;
         this.#writeCwtColumns(msg.data, msg.nCols);
