@@ -8,6 +8,33 @@
       "description": "Real-time spectrum analyzer for the device microphone: FFT / PSD with averaging and peak hold, STFT and wavelet spectrograms, and a triggered scope.",
       "tags": ["FFT · PSD", "SPECTROGRAM", "CWT", "MIC INPUT"],
       "public": true
+    },
+    {
+      "id": "dalembert",
+      "title": "D'ALEMBERT WAVES",
+      "path": "apps/dalembert/",
+      "icon": "apps/dalembert/icon.svg",
+      "description": "Travelling waves on a plucked string: f(x−ct) + g(x+ct), with the mirror images beyond the fixed ends that become the reflections.",
+      "tags": ["3C6 · S4", "STRINGS"],
+      "public": false
+    },
+    {
+      "id": "dispersion",
+      "title": "DISPERSION",
+      "path": "apps/dispersion/",
+      "icon": "apps/dispersion/icon.svg",
+      "description": "Group velocity vs phase velocity: a wave packet whose envelope outruns its crests, and two-tone beating with markers riding each.",
+      "tags": ["3C6 · S4", "WAVES"],
+      "public": false
+    },
+    {
+      "id": "beam-waves",
+      "title": "BEAM WAVE TYPES",
+      "path": "apps/beam-waves/",
+      "icon": "apps/beam-waves/icon.svg",
+      "description": "The four wave solutions of the beam equation animated side by side: two evanescent near-fields and two travelling waves.",
+      "tags": ["3C6 · S5", "BEAMS"],
+      "public": false
     }
   ]
 }

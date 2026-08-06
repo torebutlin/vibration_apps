@@ -194,9 +194,11 @@ export class SpectrumView {
     let yMax;
     if (dB) {
       if (s.get('ampAuto')) {
-        // required ceiling: 6 dB headroom, quantized to 5 dB steps
+        // required ceiling: headroom for the peak labels (more in big
+        // label mode), quantized to 5 dB steps
+        const headroom = s.get('labelSize') === 'big' ? 12 : 6;
         const peak = scanPeak(-160);
-        const required = Math.max(Math.min(Math.ceil((peak + 6) / 5) * 5, 20), -60);
+        const required = Math.max(Math.min(Math.ceil((peak + headroom) / 5) * 5, 20), -60);
         this.autoTop = this.#trackAutoRange(this.autoTop, required, 12);
         yMax = this.autoTop;
         yMin = this.autoTop - 110;
@@ -305,7 +307,7 @@ export class SpectrumView {
     this.dominantPeak = null;
     const nLabels = s.get('peakLabels');
     if (nLabels > 0) {
-      this.#drawPeakLabels(ctx, peakHoldActive ? peakSegments : segments, dB, nLabels, th);
+      this.#drawPeakLabels(ctx, peakHoldActive ? peakSegments : segments, dB, nLabels, th, w);
     }
 
     // rubber band
@@ -428,7 +430,7 @@ export class SpectrumView {
     }
   }
 
-  #drawPeakLabels(ctx, segments, dB, nLabels, th) {
+  #drawPeakLabels(ctx, segments, dB, nLabels, th, w) {
     // collect candidate peaks across segments (multires: per segment)
     const all = [];
     for (const seg of segments) {
@@ -464,7 +466,10 @@ export class SpectrumView {
       const label = p.freq >= 1000 ? `${(p.freq / 1000).toFixed(2)}k` : p.freq.toFixed(1);
       const tw = ctx.measureText(label).width + 10 * F;
       stagger = px - lastLabelX < tw + 6 ? (stagger + 1) % 3 : 0;
-      const ly = Math.max(py - 12 * F - stagger * 15 * F, this.axes.rect.y + 14 * F);
+      // clamp the tag fully inside the canvas: vertically (top edge) and
+      // horizontally (leader slants when the tag can't sit over the peak)
+      const ly = Math.max(py - 12 * F - stagger * 15 * F, 24 * F + 2);
+      const lx = Math.min(Math.max(px, tw / 2 + 2), w - tw / 2 - 2);
       // marker
       ctx.fillStyle = th.tracePeak;
       ctx.beginPath();
@@ -476,19 +481,19 @@ export class SpectrumView {
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(px, py - 4 * F);
-      ctx.lineTo(px, ly - 11 * F);
+      ctx.lineTo(lx, ly - 9 * F);
       ctx.stroke();
       // tag
       ctx.globalAlpha = 1;
       ctx.fillStyle = th.tagBg;
-      ctx.fillRect(px - tw / 2, ly - 24 * F, tw, 15 * F);
+      ctx.fillRect(lx - tw / 2, ly - 24 * F, tw, 15 * F);
       ctx.globalAlpha = 0.5;
       ctx.strokeStyle = th.tracePeak;
-      ctx.strokeRect(px - tw / 2 + 0.5, ly - 24 * F + 0.5, tw - 1, 15 * F - 1);
+      ctx.strokeRect(lx - tw / 2 + 0.5, ly - 24 * F + 0.5, tw - 1, 15 * F - 1);
       ctx.globalAlpha = 1;
       ctx.fillStyle = th.tracePeak;
-      ctx.fillText(label, px, ly - 11 * F);
-      lastLabelX = px;
+      ctx.fillText(label, lx, ly - 11 * F);
+      lastLabelX = lx;
     }
   }
 
