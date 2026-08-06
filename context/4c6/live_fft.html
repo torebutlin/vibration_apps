@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live FFT Audio Plot</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+        }
+        #controls {
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-bottom: 1px solid #ccc;
+        }
+        #plot {
+            width: 100%;
+            height: calc(100vh - 50px);
+        }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <!-- FFT Length Selection -->
+        <label for="fftLength">FFT Length:</label>
+        <select id="fftLength">
+            <option value="256">256</option>
+            <option value="512">512</option>
+            <option value="1024">1024</option>
+            <option value="2048">2048</option>
+            <option value="4096" selected>4096</option>
+            <option value="8192">8192</option>
+        </select>
+
+        <!-- Frequency Scale Selection -->
+        <label for="freqScale">Frequency Scale:</label>
+        <select id="freqScale">
+            <option value="linear">Linear</option>
+            <option value="log">Log</option>
+        </select>
+
+        <!-- Y-Axis Scale Selection -->
+        <label for="yScale">Y-Axis Scale:</label>
+        <select id="yScale">
+            <option value="linear">Linear</option>
+            <option value="dB">dB</option>
+        </select>
+
+        <!-- High Frequency Limit Selection -->
+        <label for="highFreqLimit">High Frequency Limit:</label>
+        <select id="highFreqLimit">
+            <option value="500">500 Hz</option>
+            <option value="1000">1000 Hz</option>
+            <option value="2000" selected>2000 Hz</option>
+            <option value="5000">5000 Hz</option>
+            <option value="10000">10000 Hz</option>
+        </select>
+
+        <!-- Peak Hold Time Selection -->
+        <label for="peakHoldTime">Peak Hold Time:</label>
+        <select id="peakHoldTime">
+            <option value="1">1s</option>
+            <option value="2" selected>2s</option>
+            <option value="5">5s</option>
+            <option value="10">10s</option>
+        </select>
+
+        <!-- Audio Input Selection -->
+        <label for="audioInput">Audio Input:</label>
+        <select id="audioInput"></select>
+    </div>
+    <div id="plot"></div>
+
+    <script>
+        // Get references to the DOM elements
+        const fftLengthSelect = document.getElementById('fftLength');
+        const freqScaleSelect = document.getElementById('freqScale');
+        const yScaleSelect = document.getElementById('yScale');
+        const highFreqLimitSelect = document.getElementById('highFreqLimit');
+        const peakHoldTimeSelect = document.getElementById('peakHoldTime');
+        const audioInputSelect = document.getElementById('audioInput');
+        const plotDiv = document.getElementById('plot');
+
+        let audioContext;
+        let analyser;
+        let dataArray;
+        let bufferLength;
+        let peakHoldData = [];
+        let peakHoldTime = 2;
+
+        // Initialize audio input and setup analyser
+        async function initAudio() {
+            // Request permission to access the microphone
+            let initialStream;
+            try {
+                initialStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            } catch (err) {
+                console.error('Error accessing audio input:', err);
+                alert('Error accessing audio input. Please check your microphone settings.');
+                return;
+            }
+
+            // Get list of audio input devices
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const audioDevices = devices.filter(device => device.kind === 'audioinput');
+            audioDevices.forEach((device, index) => {
+                const option = document.createElement('option');
+                option.value = device.deviceId;
+                option.text = device.label || `Microphone ${index + 1}`; // Ensure device labels are correctly assigned
+                audioInputSelect.appendChild(option);
+            });
+
+            // Add event listener for audio input change
+            audioInputSelect.addEventListener('change', updateAudioInput);
+            if (audioDevices.length > 0) {
+                audioInputSelect.value = audioDevices[0].deviceId;
+                await updateAudioInput();
+            }
+
+            // Get audio stream for the selected device
+            let stream;
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: audioInputSelect.value } } });
+            } catch (err) {
+                console.error('Error accessing selected audio input:', err);
+                alert('Error accessing selected audio input. Please check your microphone settings.');
+                return;
+            }
+        }
+
+        // Update audio input when selection changes
+        async function updateAudioInput() {
+            if (audioContext) {
+                audioContext.close();
+            }
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: audioInputSelect.value } } });
+            const source = audioContext.createMediaStreamSource(stream);
+            analyser = audioContext.createAnalyser();
+            source.connect(analyser);
+            updateFFTLength();
+            updatePeakHoldTime();
+            requestAnimationFrame(draw);
+        }
+
+        // Update FFT length based on selection
+        function updateFFTLength() {
+            analyser.fftSize = parseInt(fftLengthSelect.value);
+            bufferLength = analyser.frequencyBinCount;
+            dataArray = new Uint8Array(bufferLength);
+        }
+
+        // Update peak hold time based on selection
+        function updatePeakHoldTime() {
+            peakHoldTime = parseInt(peakHoldTimeSelect.value);
+        }
+
+        // Create a Hanning window for smoothing the data
+        function createHanningWindow(length) {
+            const window = new Float32Array(length);
+            for (let i = 0; i < length; i++) {
+                window[i] = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (length - 1)));
+            }
+            return window;
+        }
+
+        // Apply the Hanning window to the data
+        function applyWindow(data, window) {
+            return data.map((value, index) => value * window[index]);
+        }
+
+        // Draw the FFT plot
+        function draw() {
+            requestAnimationFrame(draw);
+            analyser.getByteTimeDomainData(dataArray);
+
+            // Apply Hanning window to the data
+            const hanningWindow = createHanningWindow(bufferLength);
+            const windowedData = applyWindow(Array.from(dataArray), hanningWindow);
+
+            analyser.getByteFrequencyData(dataArray);
+
+            const freqData = Array.from(dataArray);
+            for (let i = 0; i < bufferLength; i++) {
+                if (!peakHoldData[i]) {
+                    peakHoldData[i] = [];
+                }
+                peakHoldData[i].push(freqData[i]);
+                if (peakHoldData[i].length > peakHoldTime * 60) {
+                    peakHoldData[i].shift();
+                }
+            }
+            const peakHold = peakHoldData.map(d => Math.max(...d));
+
+            const xValues = freqData.map((_, i) => i * audioContext.sampleRate / analyser.fftSize);
+            const trace1 = {
+                x: xValues,
+                y: freqData,
+                text: xValues.map(x => `${x.toFixed(2)} Hz`),
+                type: 'scatter',
+                mode: 'lines',
+                line: { color: 'darkblue' },
+                name: 'Live',
+                hoverinfo: 'text'
+            };
+            
+            const trace2 = {
+                x: xValues,
+                y: peakHold,
+                text: xValues.map(x => `${x.toFixed(2)} Hz`),
+                type: 'scatter',
+                mode: 'lines',
+                line: { color: 'darkorange' },
+                name: 'Peak Hold',
+                hoverinfo: 'text'
+            };
+
+            const peakAnnotations = [
+                {
+                    x: xValues[freqData.indexOf(Math.max(...freqData))],
+                    y: Math.max(...freqData),
+                    xref: 'x',
+                    yref: 'y',
+                    text: `Peak: ${xValues[freqData.indexOf(Math.max(...freqData))].toFixed(2)} Hz`,
+                    showarrow: true,
+                    arrowhead: 7,
+                    ax: 0,
+                    ay: -40
+                },
+                {
+                    x: xValues[peakHold.indexOf(Math.max(...peakHold))],
+                    y: Math.max(...peakHold),
+                    xref: 'x',
+                    yref: 'y',
+                    text: `Peak Hold: ${xValues[peakHold.indexOf(Math.max(...peakHold))].toFixed(2)} Hz`,
+                    showarrow: true,
+                    arrowhead: 7,
+                    ax: 0,
+                    ay: -40
+                }
+            ];
+
+            const layout = {
+                xaxis: {
+                    type: freqScaleSelect.value,
+                    range: freqScaleSelect.value === 'log' ? [Math.log10(10), Math.log10(parseInt(highFreqLimitSelect.value))] : [0, parseInt(highFreqLimitSelect.value)],
+                    title: 'Frequency (Hz)'
+                },
+                yaxis: {
+                    type: yScaleSelect.value,
+                    title: 'Amplitude'
+                },
+                margin: { t: 10 },
+                annotations: peakAnnotations
+            };
+
+            Plotly.react(plotDiv, [trace1, trace2], layout);
+        }
+
+        // Add event listeners for control changes
+        fftLengthSelect.addEventListener('change', updateFFTLength);
+        peakHoldTimeSelect.addEventListener('change', updatePeakHoldTime);
+
+        // Initialize audio and start drawing
+        initAudio().then(() => requestAnimationFrame(draw));
+    </script>
+</body>
+</html>

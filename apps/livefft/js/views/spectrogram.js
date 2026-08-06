@@ -13,15 +13,19 @@ import { rfftMagSq } from '../../../../shared/js/dsp/fft.js';
 import { getWindow } from '../../../../shared/js/dsp/windows.js';
 import { getColormap } from '../../../../shared/js/plot/colormap.js';
 import { Axes, fmtHz, plotTheme } from '../../../../shared/js/plot/axes.js';
+import { effectiveFreqScale } from '../state.js';
 
 const COLS = 1024;
 const ROWS = 512;
 
-// In CWT mode the display is pinned a fixed margin behind real time (on
-// top of the wavelet latency) so worker batches always land before their
-// columns reach the right edge — the edge stays filled instead of showing
-// a hovering "not yet computed" gap.
-const CWT_DISPLAY_MARGIN = 0.45; // seconds
+// In CWT mode the display is pinned a margin behind real time (on top of
+// the wavelet latency) so worker batches always land before their columns
+// reach the right edge — the edge stays filled instead of showing a
+// hovering "not yet computed" gap. The margin adapts to the observed
+// worker batch interval, so slower devices (phones, high bins/octave)
+// simply sit a little further behind real time instead of stuttering.
+const CWT_MARGIN_MIN = 0.45; // seconds
+const CWT_MARGIN_MAX = 4.0;
 
 export class SpectrogramView {
   constructor(state) {
@@ -44,6 +48,9 @@ export class SpectrogramView {
     this.cwtLatency = 0;
     this.cwtDecRate = 0;
     this.lastDecSent = 0;
+    this.displayMargin = CWT_MARGIN_MIN; // slewed toward batchGapMax
+    this.batchGapMax = CWT_MARGIN_MIN;
+    this.lastResultAt = 0;
 
     this.sinceCol = 0;      // samples since last emitted column (stft)
     this.lastTotal = 0;
@@ -87,7 +94,7 @@ export class SpectrogramView {
    *  (which respects the lin/log toggle for display). */
   #freqRange() {
     const s = this.state;
-    const log = s.get('freqScale') === 'log';
+    const log = effectiveFreqScale(s, 'spectrogram') === 'log';
     if (this.isCwt) {
       return { min: s.get('cwtFMin'), max: Math.min(s.get('cwtFMax'), this.sampleRate / 2), log };
     }
@@ -132,13 +139,15 @@ export class SpectrogramView {
   #rebuild() {
     const s = this.state;
     const fs = this.sampleRate;
-    // Total display delay (CWT): wavelet latency (4 sigma at fMin) plus
-    // the batch margin. The column ring covers span + delay so the plot
-    // stays filled edge-to-edge despite the delayed drawing position.
-    this.displayDelaySec = this.isCwt
-      ? (4 * s.get('cwtOmega0')) / (2 * Math.PI * s.get('cwtFMin')) + CWT_DISPLAY_MARGIN
-      : 0;
-    this.colPeriodSamples = ((s.get('sgSpan') + this.displayDelaySec) * fs) / COLS;
+    // Total display delay (CWT): wavelet latency (4 sigma at fMin) plus a
+    // batch margin that adapts to the worker's observed cadence (slow
+    // devices sit further behind real time instead of stuttering). The
+    // column ring is sized for the worst-case margin so the plot stays
+    // filled edge-to-edge whatever the margin adapts to.
+    this.cwtLatencySec = (4 * s.get('cwtOmega0')) / (2 * Math.PI * s.get('cwtFMin'));
+    this.displayDelaySec = this.isCwt ? this.cwtLatencySec + CWT_MARGIN_MIN : 0;
+    this.colPeriodSamples =
+      ((s.get('sgSpan') + (this.isCwt ? this.cwtLatencySec + CWT_MARGIN_MAX : 0)) * fs) / COLS;
     this.sinceCol = 0;
     this.lastTotal = 0;
     this.newestColTotal = 0;
@@ -178,6 +187,9 @@ export class SpectrogramView {
     this.workerReady = false;
     this.workerBusy = false;
     this.worker = new Worker(new URL('../workers/cwt-worker.js', import.meta.url), { type: 'module' });
+    this.displayMargin = CWT_MARGIN_MIN;
+    this.batchGapMax = CWT_MARGIN_MIN;
+    this.lastResultAt = 0;
     const s = this.state;
     // block long enough for the 4-sigma latency of the lowest wavelet PLUS
     // ~1 s of usable output columns per analysis call
@@ -210,6 +222,13 @@ export class SpectrogramView {
         this.#buildCwtRowMap();
       } else if (msg.type === 'result') {
         this.workerBusy = false;
+        // decaying max of the interval between batches drives the margin
+        const now = performance.now() / 1000;
+        if (this.lastResultAt) {
+          const gap = now - this.lastResultAt;
+          this.batchGapMax = Math.max(gap, this.batchGapMax * 0.97);
+        }
+        this.lastResultAt = now;
         this.#writeCwtColumns(msg.data, msg.nCols);
       }
     };
@@ -365,6 +384,12 @@ export class SpectrogramView {
     // overhang the right edge and glide into view — no hovering gap, and
     // the left edge stays covered too.
     const fsr = this.sampleRate;
+    if (this.isCwt) {
+      // slew the delay toward what the worker's batch cadence needs
+      const target =
+        this.cwtLatencySec + Math.min(Math.max(1.3 * this.batchGapMax, CWT_MARGIN_MIN), CWT_MARGIN_MAX);
+      this.displayDelaySec += 0.04 * (target - this.displayDelaySec);
+    }
     const dSamples = this.displayDelaySec * fsr;
     const pxPerSample = r.w / (s.get('sgSpan') * fsr);
     let xEnd = r.x + r.w; // newest column's right edge, in px
@@ -388,12 +413,12 @@ export class SpectrogramView {
     if (wNew > 0) {
       ctx.drawImage(this.img, 0, 0, wNew, ROWS, xStart + (wOld / COLS) * ringW, r.y, (wNew / COLS) * ringW, r.h);
     }
-    if (xEnd < r.x + r.w) {
-      // not-yet-computed strip at the right: paint as silence, not page bg
-      const lut = this.lut;
-      ctx.fillStyle = `rgb(${lut[0]}, ${lut[1]}, ${lut[2]})`;
-      ctx.fillRect(xEnd, r.y, r.x + r.w - xEnd, r.h);
-    }
+    // uncovered strips (right: not yet computed; left: possible during
+    // margin adaptation): paint as silence, not page bg
+    const lut = this.lut;
+    ctx.fillStyle = `rgb(${lut[0]}, ${lut[1]}, ${lut[2]})`;
+    if (xEnd < r.x + r.w) ctx.fillRect(xEnd, r.y, r.x + r.w - xEnd, r.h);
+    if (xStart > r.x) ctx.fillRect(r.x, r.y, xStart - r.x, r.h);
     ctx.restore();
 
     // frame + labels, no grid over the image

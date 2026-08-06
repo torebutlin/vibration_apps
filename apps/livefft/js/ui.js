@@ -1,6 +1,7 @@
 // Control panel bindings: DOM <-> State, plus view-dependent visibility.
 
 import { DEMO_SOURCES } from '../../../shared/js/audio/engine.js';
+import { effectiveFreqScale } from './state.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -140,6 +141,7 @@ export function initUI(state, engine, callbacks) {
   bindSwitch('sw-db', 'dB');
   bindSwitch('sw-persist', 'persistence');
   bindSelect('sel-peaklabels', 'peakLabels', (v) => parseInt(v, 10));
+  bindSeg('labelsize', 'labelSize');
 
   function updatePersistRow() {
     $('row-persist').hidden = state.get('resMode') === 'multires';
@@ -177,7 +179,8 @@ export function initUI(state, engine, callbacks) {
     if (selFrange.value === 'auto') {
       state.update({ freqAuto: true });
     } else if (selFrange.value !== 'custom') {
-      const log = state.get('freqScale') === 'log';
+      const context = state.get('view') === 'spectrogram' ? 'spectrogram' : 'spectrum';
+      const log = effectiveFreqScale(state, context) === 'log';
       state.update({ freqAuto: false, freqMin: log ? 20 : 0, freqMax: +selFrange.value });
     }
   });
@@ -299,6 +302,7 @@ export function initUI(state, engine, callbacks) {
       ['Zoom', 'Drag across the spectrum to zoom the frequency axis (pinch on touch). Double-click or double-tap to reset.'],
       ['Readout', 'Move the pointer (or touch) over the plot for a frequency and level readout at the crosshair.'],
       ['Run / pause', 'The Start button, or the space bar. Pausing freezes the display for discussion.'],
+      ['Full screen', 'The ⤢ button hides every control for a clean projected display; ✕ (or Esc) brings them back.'],
     ]);
 
     for (const group of document.querySelectorAll('#panel .group')) {

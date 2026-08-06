@@ -33,6 +33,7 @@
       <div id="topbar-right">
         <span class="lamp" id="lamp-clip">CLIP</span>
         <button class="btn" id="btn-help" aria-label="Explain the current settings" title="What do these settings mean?">?</button>
+        <button class="btn" id="btn-full" aria-label="Full screen" title="Full screen — hide all controls">⤢</button>
         <button class="btn" id="btn-theme" aria-label="Toggle light/dark theme" title="Light / dark theme">☀</button>
         <button class="btn primary" id="btn-run" title="Space bar toggles run/pause">▶ Start</button>
         <button class="btn" id="btn-panel" aria-label="Toggle controls">☰</button>
@@ -151,19 +152,30 @@
           <span class="switch"><input type="checkbox" id="sw-persist"><span class="track"></span></span>
         </div>
         <div class="row">
-          <label for="sel-peaklabels" data-tip="How many spectral peaks get frequency labels.">Peak labels</label>
+          <label for="sel-peaklabels" data-tip="How many spectral peaks get frequency labels (fewer appear if fewer genuine peaks stand out).">Peak labels</label>
           <select id="sel-peaklabels">
             <option value="0">Off</option><option value="2">2</option>
             <option value="4">4</option><option value="6">6</option><option value="8">8</option>
           </select>
+        </div>
+        <div class="row">
+          <label data-tip="Big doubles the peak-label size — for projecting to a lecture theatre.">Label size</label>
+          <nav class="seg">
+            <input type="radio" name="labelsize" value="std" id="ls-std">
+            <label for="ls-std">Std</label>
+            <input type="radio" name="labelsize" value="big" id="ls-big">
+            <label for="ls-big">Big</label>
+          </nav>
         </div>
       </div>
 
       <div class="group" data-views="spectrum spectrogram">
         <h3 class="group-title">Frequency axis</h3>
         <div class="row">
-          <label data-tip="Log spreads the octaves evenly — each doubling of frequency gets equal width. Natural for musical and structural work.">Scale</label>
+          <label data-tip="Log spreads the octaves evenly — each doubling of frequency gets equal width. Auto matches the analysis: log for wavelet and multi-res (frequency-proportional resolution), linear for STFT and fixed FFT.">Scale</label>
           <nav class="seg">
+            <input type="radio" name="fscale" value="auto" id="fs-auto">
+            <label for="fs-auto">Auto</label>
             <input type="radio" name="fscale" value="linear" id="fs-lin">
             <label for="fs-lin">Linear</label>
             <input type="radio" name="fscale" value="log" id="fs-log">
@@ -223,7 +235,7 @@
             </span>
           </div>
           <div class="row">
-            <label for="sel-cwtbpo" data-tip="How densely the frequency axis is sampled with wavelets. The true resolution is set by Wavelet Q — beyond ~32/oct you mostly pay CPU for a smoother picture.">Bins / octave</label>
+            <label for="sel-cwtbpo" data-tip="How densely the frequency axis is sampled with wavelets. The true resolution is set by Wavelet Q — beyond ~32/oct you mostly pay CPU for a smoother picture. High values can slow this view on phones (the display then trails further behind real time).">Bins / octave</label>
             <select id="sel-cwtbpo">
               <option>8</option><option>12</option><option>16</option><option>24</option>
               <option>32</option><option>48</option><option>64</option>
@@ -297,6 +309,8 @@
       </div>
     </aside>
   </div>
+
+  <button id="btn-exit-full" aria-label="Exit full screen" hidden>✕</button>
 
   <div id="help-overlay" hidden>
     <div id="help-card" class="panel" role="dialog" aria-modal="true" aria-label="Settings help">

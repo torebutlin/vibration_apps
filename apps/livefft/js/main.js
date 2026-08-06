@@ -3,7 +3,7 @@
 import { AudioEngine } from '../../../shared/js/audio/engine.js';
 import { PlotInteraction } from '../../../shared/js/plot/interaction.js';
 import { fmtHz } from '../../../shared/js/plot/axes.js';
-import { State } from './state.js';
+import { State, effectiveFreqScale } from './state.js';
 import { SpectrumView } from './views/spectrum.js';
 import { SpectrogramView } from './views/spectrogram.js';
 import { ScopeView } from './views/scope.js';
@@ -57,7 +57,7 @@ const interaction = new PlotInteraction(canvas, views.spectrum.axes, {
   onXRange(min, max) {
     if (state.get('view') !== 'spectrum') return;
     const fs = engine.sampleRate;
-    const log = state.get('freqScale') === 'log';
+    const log = effectiveFreqScale(state, 'spectrum') === 'log';
     min = Math.max(log ? 1 : 0, min);
     max = Math.min(fs / 2, max);
     if (max - min < 10) return;
@@ -125,11 +125,32 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
     toggleRun();
   }
+  if (e.key === 'Escape' && document.body.classList.contains('fullview')) setFullview(false);
 });
 
 engine.onOverload = () => {
   lastClip = performance.now();
 };
+
+// ---------- full-screen view ----------
+
+const btnExitFull = document.getElementById('btn-exit-full');
+
+function setFullview(on) {
+  document.body.classList.toggle('fullview', on);
+  btnExitFull.hidden = !on;
+  if (on) {
+    document.documentElement.requestFullscreen?.().catch(() => { /* iOS: CSS-only */ });
+  } else if (document.fullscreenElement) {
+    document.exitFullscreen?.();
+  }
+}
+
+document.getElementById('btn-full').addEventListener('click', () => setFullview(true));
+btnExitFull.addEventListener('click', () => setFullview(false));
+document.addEventListener('fullscreenchange', () => {
+  if (!document.fullscreenElement) setFullview(false);
+});
 
 // ---------- theme ----------
 

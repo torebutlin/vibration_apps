@@ -19,10 +19,11 @@ export const DEFAULTS = {
   linearTarget: 16,
   peakHold: false,
   peakLabels: 4,
+  labelSize: 'std',          // std | big (lecture projection)
   persistence: true,
 
   // frequency axis (shared: spectrum x, spectrogram y)
-  freqScale: 'linear',       // linear | log
+  freqScale: 'auto',         // auto | linear | log
   freqMin: 20,
   freqMax: 5000,
   freqAuto: false,           // true = full 0..fs/2 (or 20..fs/2 in log)
@@ -49,6 +50,20 @@ export const DEFAULTS = {
 
   monitorLevel: 0,
 };
+
+/**
+ * Resolve the frequency-axis scale. 'auto' matches the analysis: log for
+ * the wavelet spectrogram and multi-res spectrum (their resolution is
+ * frequency-proportional), linear for STFT and fixed-resolution FFT.
+ * @param {State} state
+ * @param {'spectrum'|'spectrogram'} context which view's axis is being drawn
+ */
+export function effectiveFreqScale(state, context) {
+  const v = state.get('freqScale');
+  if (v !== 'auto') return v;
+  if (context === 'spectrogram') return state.get('sgMode') === 'cwt' ? 'log' : 'linear';
+  return state.get('resMode') === 'multires' ? 'log' : 'linear';
+}
 
 export class State {
   constructor() {

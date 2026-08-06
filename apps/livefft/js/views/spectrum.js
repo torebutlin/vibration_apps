@@ -5,6 +5,7 @@ import { SpectrumProcessor } from '../../../../shared/js/dsp/spectrum.js';
 import { MultiResSpectrum } from '../../../../shared/js/dsp/multires.js';
 import { findPeaks } from '../../../../shared/js/dsp/peaks.js';
 import { Axes, fmtHz, plotTheme } from '../../../../shared/js/plot/axes.js';
+import { effectiveFreqScale } from '../state.js';
 
 // The spectrum shows PSD only: with averaging off it's the live FFT
 // (instantaneous periodogram); averaging turns it into a Welch estimate.
@@ -128,7 +129,7 @@ export class SpectrumView {
   #freqRange() {
     const s = this.state;
     const fs = this.sampleRate ?? 48000;
-    const log = s.get('freqScale') === 'log';
+    const log = effectiveFreqScale(s, 'spectrum') === 'log';
     if (s.get('freqAuto')) return { min: log ? 20 : 0, max: fs / 2, log };
     let min = s.get('freqMin');
     let max = Math.min(s.get('freqMax'), fs / 2);
@@ -450,7 +451,9 @@ export class SpectrumView {
       this.dominantPeak = { freq: all[0].freq, db: all[0].db };
     }
 
-    ctx.font = '500 11px "JetBrains Mono", monospace';
+    // F scales everything for the lecture-display "big" mode
+    const F = this.state.get('labelSize') === 'big' ? 2 : 1;
+    ctx.font = `500 ${11 * F}px "JetBrains Mono", monospace`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
     let lastLabelX = -Infinity;
@@ -459,32 +462,32 @@ export class SpectrumView {
       const px = this.axes.xToPx(p.freq);
       const py = this.axes.yToPx(p.value);
       const label = p.freq >= 1000 ? `${(p.freq / 1000).toFixed(2)}k` : p.freq.toFixed(1);
-      const tw = ctx.measureText(label).width + 10;
+      const tw = ctx.measureText(label).width + 10 * F;
       stagger = px - lastLabelX < tw + 6 ? (stagger + 1) % 3 : 0;
-      const ly = Math.max(py - 12 - stagger * 15, this.axes.rect.y + 14);
+      const ly = Math.max(py - 12 * F - stagger * 15 * F, this.axes.rect.y + 14 * F);
       // marker
       ctx.fillStyle = th.tracePeak;
       ctx.beginPath();
-      ctx.arc(px, py, 2.5, 0, Math.PI * 2);
+      ctx.arc(px, py, 2.5 * F, 0, Math.PI * 2);
       ctx.fill();
       // leader
       ctx.globalAlpha = 0.4;
       ctx.strokeStyle = th.tracePeak;
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(px, py - 4);
-      ctx.lineTo(px, ly - 11);
+      ctx.moveTo(px, py - 4 * F);
+      ctx.lineTo(px, ly - 11 * F);
       ctx.stroke();
       // tag
       ctx.globalAlpha = 1;
       ctx.fillStyle = th.tagBg;
-      ctx.fillRect(px - tw / 2, ly - 24, tw, 15);
+      ctx.fillRect(px - tw / 2, ly - 24 * F, tw, 15 * F);
       ctx.globalAlpha = 0.5;
       ctx.strokeStyle = th.tracePeak;
-      ctx.strokeRect(px - tw / 2 + 0.5, ly - 23.5, tw - 1, 14);
+      ctx.strokeRect(px - tw / 2 + 0.5, ly - 24 * F + 0.5, tw - 1, 15 * F - 1);
       ctx.globalAlpha = 1;
       ctx.fillStyle = th.tracePeak;
-      ctx.fillText(label, px, ly - 11);
+      ctx.fillText(label, px, ly - 11 * F);
       lastLabelX = px;
     }
   }
