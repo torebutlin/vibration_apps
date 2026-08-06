@@ -103,6 +103,11 @@
       padding: 0.12rem 0.4rem;
     }
 
+    .tag.draft {
+      color: var(--amber);
+      border-color: var(--amber);
+    }
+
     .soon {
       border: 1px dashed var(--line);
       border-radius: var(--radius);
@@ -147,28 +152,42 @@
       </p>
     </header>
 
-    <main class="apps">
-      <a class="card panel" href="apps/livefft/">
-        <img src="apps/livefft/icons/icon-192.png" alt="">
-        <div>
-          <h2>LIVE FFT</h2>
-          <p>Real-time spectrum analyzer for the device microphone: FFT / PSD
-             with averaging and peak hold, STFT and wavelet spectrograms, and
-             a triggered scope.</p>
-          <div class="tags">
-            <span class="tag">FFT · PSD</span>
-            <span class="tag">SPECTROGRAM</span>
-            <span class="tag">CWT</span>
-            <span class="tag">MIC INPUT</span>
-          </div>
-        </div>
-      </a>
+    <main class="apps" id="apps"></main>
 
-      <div class="soon">
-        More to come — waves, modes, tuning &amp; measurement demos from the
-        vibration course notebooks.
-      </div>
-    </main>
+    <script>
+      // The gallery renders from apps.json. Entries with "public": false
+      // are unlisted drafts: reachable by direct URL, and shown here (with
+      // a DRAFT badge) only when the page is loaded with ?drafts=1.
+      const showDrafts = new URLSearchParams(location.search).has('drafts');
+      fetch('apps.json')
+        .then((r) => r.json())
+        .then(({ apps }) => {
+          const main = document.getElementById('apps');
+          for (const app of apps) {
+            if (!app.public && !showDrafts) continue;
+            const a = document.createElement('a');
+            a.className = 'card panel';
+            a.href = app.path;
+            const tags = [...app.tags, ...(app.public ? [] : ['DRAFT'])]
+              .map((t) => `<span class="tag${t === 'DRAFT' ? ' draft' : ''}">${t}</span>`)
+              .join('');
+            a.innerHTML = `
+              <img src="${app.icon}" alt="">
+              <div>
+                <h2></h2>
+                <p></p>
+                <div class="tags">${tags}</div>
+              </div>`;
+            a.querySelector('h2').textContent = app.title;
+            a.querySelector('p').textContent = app.description;
+            main.appendChild(a);
+          }
+          const soon = document.createElement('div');
+          soon.className = 'soon';
+          soon.textContent = 'More to come — waves, modes, tuning & measurement demos from the vibration course notebooks.';
+          main.appendChild(soon);
+        });
+    </script>
 
     <footer>
       Built for undergraduate vibration teaching.

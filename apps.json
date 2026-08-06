@@ -1,0 +1,13 @@
+{
+  "apps": [
+    {
+      "id": "livefft",
+      "title": "LIVE FFT",
+      "path": "apps/livefft/",
+      "icon": "apps/livefft/icons/icon-192.png",
+      "description": "Real-time spectrum analyzer for the device microphone: FFT / PSD with averaging and peak hold, STFT and wavelet spectrograms, and a triggered scope.",
+      "tags": ["FFT · PSD", "SPECTROGRAM", "CWT", "MIC INPUT"],
+      "public": true
+    }
+  ]
+}
