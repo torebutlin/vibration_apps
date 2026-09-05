@@ -1,22 +1,24 @@
 /* Vibration Apps — shared instrument theme.
-   Dark bench-instrument aesthetic: near-black blue panel, phosphor accent,
-   hairline borders, condensed technical labels + mono readouts. */
+   Dark bench-instrument aesthetic: near-black blue ground, phosphor accent,
+   hairline borders, condensed technical labels + mono readouts.
+   Every colour used by the apps is a token here; app CSS and canvas code
+   read tokens, never literals, so both themes stay complete. */
 
 @import url('fonts.css');
 
 :root {
-  --bg-page: #07090f;
-  --bg-panel: #0d1119;
-  --bg-raised: #121826;
-  --bg-inset: #0a0e16;
-  --line: rgba(158, 178, 216, 0.12);
-  --line-strong: rgba(158, 178, 216, 0.22);
+  --bg-page: #0a0d14;
+  --bg-panel: #0a0d14;        /* rail / header: same ground as the page */
+  --bg-raised: #131a26;       /* controls */
+  --bg-inset: #0a0d14;        /* plot: same ground as the page */
+  --line: rgba(158, 178, 216, 0.14);
+  --line-strong: rgba(158, 178, 216, 0.24);
   --text: #d9e2f4;
-  --text-dim: #8391ab;
-  --text-faint: #56617a;
+  --text-dim: #8a97b0;
+  --text-faint: #5a657c;
   --accent: #38e1c8;          /* phosphor teal — live trace, primary actions */
   --accent-dim: rgba(56, 225, 200, 0.14);
-  --accent-border: rgba(56, 225, 200, 0.4);
+  --accent-border: rgba(56, 225, 200, 0.45);
   --amber: #ffb454;           /* peak hold, warnings */
   --danger: #ff4d5e;
   --font-ui: 'Rajdhani', 'Avenir Next Condensed', sans-serif;
@@ -24,12 +26,23 @@
   --radius: 10px;
   --radius-sm: 6px;
 
+  /* surfaces that float over the plot (phone pills, sheet, scrim) */
+  --pill: rgba(16, 21, 31, 0.8);
+  --sheet: #10151f;
+  --sheet-shadow: 0 -12px 40px rgba(0, 0, 0, 0.5);
+  --scrim: rgba(4, 6, 10, 0.45);
+  --btn-hover: #182034;
+  --thumb-glow: rgba(56, 225, 200, 0.5);
+  --seg-shadow: rgba(0, 0, 0, 0.5);
+  --toast-border: rgba(255, 77, 94, 0.5);
+  --overlay-shadow: rgba(0, 0, 0, 0.5);
+
   /* plot colours, read by the canvas renderers via plotTheme() */
-  --plot-grid: rgba(158, 178, 216, 0.07);
-  --plot-grid-strong: rgba(158, 178, 216, 0.14);
-  --plot-frame: rgba(158, 178, 216, 0.25);
-  --plot-label: #8391ab;
-  --plot-title: #56617a;
+  --plot-grid: rgba(158, 178, 216, 0.08);
+  --plot-grid-strong: rgba(158, 178, 216, 0.16);
+  --plot-frame: rgba(158, 178, 216, 0.28);
+  --plot-label: #8a97b0;
+  --plot-title: #5a657c;
   --plot-text: #d9e2f4;
   --plot-crosshair: rgba(217, 226, 244, 0.25);
   --trace-main: #3fe8d2;
@@ -39,40 +52,52 @@
   --plot-tag-border: rgba(158, 178, 216, 0.3);
   --plot-persist-color: rgba(63, 232, 210, 0.05);
   --plot-persist-comp: lighter;
-  --plot-inset-shadow: inset 0 0 40px rgba(0, 0, 0, 0.45);
+  --plot-rubber: rgba(56, 225, 200, 0.08);
+  --plot-rubber-line: rgba(56, 225, 200, 0.4);
 }
 
 :root[data-theme='light'] {
-  --bg-page: #eef1f6;
-  --bg-panel: #f9fafc;
-  --bg-raised: #eef1f6;
-  --bg-inset: #e5eaf2;
-  --line: rgba(30, 45, 80, 0.13);
-  --line-strong: rgba(30, 45, 80, 0.24);
-  --text: #1e2836;
-  --text-dim: #5c6b84;
-  --text-faint: #8b98ad;
-  --accent: #0a9488;
-  --accent-dim: rgba(10, 148, 136, 0.12);
-  --accent-border: rgba(10, 148, 136, 0.45);
-  --amber: #d97706;
-  --danger: #dc2626;
+  --bg-page: #f4f6f9;
+  --bg-panel: #ffffff;
+  --bg-raised: #ffffff;
+  --bg-inset: #f4f6f9;
+  --line: rgba(28, 36, 51, 0.14);
+  --line-strong: rgba(28, 36, 51, 0.26);
+  --text: #1c2433;
+  --text-dim: #5b6980;
+  --text-faint: #8d99ad;
+  --accent: #0c8f84;
+  --accent-dim: rgba(12, 143, 132, 0.12);
+  --accent-border: rgba(12, 143, 132, 0.5);
+  --amber: #b45f06;
+  --danger: #c0392b;
 
-  --plot-grid: rgba(30, 45, 80, 0.08);
-  --plot-grid-strong: rgba(30, 45, 80, 0.15);
-  --plot-frame: rgba(30, 45, 80, 0.4);
-  --plot-label: #5c6b84;
-  --plot-title: #8b98ad;
-  --plot-text: #1e293b;
-  --plot-crosshair: rgba(30, 41, 59, 0.35);
-  --trace-main: #0a9488;
-  --trace-ghost: rgba(10, 148, 136, 0.35);
-  --trace-peak: #d97706;
+  --pill: rgba(255, 255, 255, 0.84);
+  --sheet: #ffffff;
+  --sheet-shadow: 0 -12px 40px rgba(28, 36, 51, 0.18);
+  --scrim: rgba(28, 36, 51, 0.3);
+  --btn-hover: #eef1f6;
+  --thumb-glow: rgba(12, 143, 132, 0.35);
+  --seg-shadow: rgba(28, 36, 51, 0.18);
+  --toast-border: rgba(192, 57, 43, 0.5);
+  --overlay-shadow: rgba(28, 36, 51, 0.25);
+
+  --plot-grid: rgba(28, 36, 51, 0.07);
+  --plot-grid-strong: rgba(28, 36, 51, 0.15);
+  --plot-frame: rgba(28, 36, 51, 0.35);
+  --plot-label: #5b6980;
+  --plot-title: #8d99ad;
+  --plot-text: #1c2433;
+  --plot-crosshair: rgba(28, 36, 51, 0.35);
+  --trace-main: #0c8f84;
+  --trace-ghost: rgba(12, 143, 132, 0.35);
+  --trace-peak: #b45f06;
   --plot-tag-bg: rgba(255, 255, 255, 0.92);
-  --plot-tag-border: rgba(30, 45, 80, 0.25);
-  --plot-persist-color: rgba(10, 148, 136, 0.05);
+  --plot-tag-border: rgba(28, 36, 51, 0.25);
+  --plot-persist-color: rgba(12, 143, 132, 0.05);
   --plot-persist-comp: source-over;
-  --plot-inset-shadow: inset 0 0 30px rgba(30, 45, 80, 0.07);
+  --plot-rubber: rgba(12, 143, 132, 0.1);
+  --plot-rubber-line: rgba(12, 143, 132, 0.45);
 }
 
 * { box-sizing: border-box; }
@@ -99,9 +124,10 @@ html, body {
 }
 
 .group {
-  border-top: 1px solid var(--line);
   padding: 0.65rem 0.9rem 0.8rem;
 }
+
+.group + .group { border-top: 1px solid var(--line); }
 
 .group-title {
   font-size: 0.72rem;
@@ -168,8 +194,9 @@ select:hover, select:focus-visible { border-color: var(--line-strong); outline: 
   user-select: none;
 }
 
-.btn:hover { border-color: var(--line-strong); background: #182034; }
+.btn:hover { border-color: var(--line-strong); background: var(--btn-hover); }
 .btn:active { transform: translateY(1px); }
+.btn:focus-visible { outline: 2px solid var(--accent-border); outline-offset: 1px; }
 
 .btn.primary {
   background: var(--accent-dim);
@@ -178,7 +205,34 @@ select:hover, select:focus-visible { border-color: var(--line-strong); outline: 
 }
 .btn.primary:hover { filter: brightness(1.15); }
 
+.btn.solid {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #06110f;
+}
+.btn.solid:hover { filter: brightness(1.08); background: var(--accent); }
+
 .btn.small { font-size: 0.72rem; padding: 0.22rem 0.55rem; }
+
+/* borderless icon/text button: header actions, sheet title row */
+.btn.ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-dim);
+}
+.btn.ghost:hover { background: var(--accent-dim); color: var(--accent); border-color: transparent; }
+
+.btn.icon {
+  width: 2.1rem;
+  height: 2.1rem;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  font-weight: 500;
+  letter-spacing: 0;
+}
 
 /* Segmented control: a radio group in a pill */
 .seg {
@@ -208,7 +262,24 @@ select:hover, select:focus-visible { border-color: var(--line-strong); outline: 
 .seg input:checked + label {
   background: var(--bg-raised);
   color: var(--accent);
-  box-shadow: 0 0 0 1px var(--line-strong), 0 1px 4px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 0 0 1px var(--line-strong), 0 1px 4px var(--seg-shadow);
+}
+
+.seg input:focus-visible + label { outline: 2px solid var(--accent-border); outline-offset: 1px; }
+
+/* Flat variant: no box, the active item is accent text with an underline */
+.seg.flat { background: transparent; border-color: transparent; padding: 0; gap: 0; }
+.seg.flat label { padding: 0.35rem 0.7rem; border-radius: 0; position: relative; }
+.seg.flat input:checked + label { background: transparent; box-shadow: none; }
+.seg.flat input:checked + label::after {
+  content: '';
+  position: absolute;
+  left: 0.7rem;
+  right: 0.7rem;
+  bottom: 0;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
 }
 
 /* Toggle switch */
@@ -227,7 +298,7 @@ select:hover, select:focus-visible { border-color: var(--line-strong); outline: 
   inset: 0;
   background: var(--bg-inset);
   border: 1px solid var(--line-strong);
-  border-radius: 10px;
+  border-radius: 12px;
   transition: background 0.18s, border-color 0.18s;
   pointer-events: none;
 }
@@ -278,7 +349,7 @@ input[type='range']::-webkit-slider-thumb {
   border-radius: 50%;
   background: var(--accent);
   margin-top: -5px;
-  box-shadow: 0 0 6px rgba(56, 225, 200, 0.5);
+  box-shadow: 0 0 6px var(--thumb-glow);
 }
 
 input[type='range']::-moz-range-track {
@@ -293,7 +364,7 @@ input[type='range']::-moz-range-thumb {
   border: none;
   border-radius: 50%;
   background: var(--accent);
-  box-shadow: 0 0 6px rgba(56, 225, 200, 0.5);
+  box-shadow: 0 0 6px var(--thumb-glow);
 }
 
 input[type='number'], input[type='text'] {
@@ -341,7 +412,7 @@ input[type='number']:focus, input[type='text']:focus { border-color: var(--accen
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #2a3145;
+  background: var(--line-strong);
   transition: background 0.1s, box-shadow 0.1s;
 }
 
@@ -358,36 +429,51 @@ input[type='number']:focus, input[type='text']:focus { border-color: var(--accen
 }
 
 /* ---------- Tooltips ---------- */
-/* Add data-tip="..." to a control label for a hover/focus explanation. */
+/* Add data-tip="..." to a control label. On hover devices a shared,
+   fixed-position #tip element (positioned by JS, see livefft ui.js) shows
+   the text, so the tip is never clipped by a scrolling panel. */
 
 [data-tip] { cursor: help; }
 
-@media (hover: hover) {
-  [data-tip] { position: relative; }
+.tip {
+  position: fixed;
+  z-index: 70;
+  width: 14rem;
+  max-width: 70vw;
+  background: var(--bg-raised);
+  border: 1px solid var(--line-strong);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  line-height: 1.45;
+  padding: 0.45rem 0.6rem;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 24px var(--overlay-shadow);
+  pointer-events: none;
+}
 
-  [data-tip]:hover::after {
-    content: attr(data-tip);
-    position: absolute;
-    left: 0;
-    top: calc(100% + 7px);
-    z-index: 40;
-    width: 13.5rem;
-    max-width: 60vw;
-    background: var(--bg-raised);
-    border: 1px solid var(--line-strong);
-    color: var(--text);
-    font-family: var(--font-ui);
-    font-size: 0.78rem;
-    font-weight: 500;
-    letter-spacing: 0.02em;
-    line-height: 1.45;
-    text-transform: none;
-    white-space: normal;
-    padding: 0.45rem 0.6rem;
-    border-radius: var(--radius-sm);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
-    pointer-events: none;
-  }
+/* ---------- Touch sizes (phones and small tablets) ---------- */
+/* 16 px on form controls stops iOS zooming on focus; 44 px targets. */
+
+@media (max-width: 860px) {
+  select, input[type='number'], input[type='text'] { font-size: 16px; }
+  select { padding: 0.5rem 1.7rem 0.5rem 0.7rem; max-width: 13rem; }
+  input[type='number'], input[type='text'] { padding: 0.45rem 0.55rem; width: 5.6rem; }
+  .row { min-height: 44px; }
+  .row + .row { margin-top: 0.15rem; }
+  .row > label { font-size: 0.95rem; }
+  .seg label { padding: 0.5rem 0.8rem; font-size: 0.9rem; }
+  .btn { font-size: 0.9rem; padding: 0.55rem 1rem; }
+  .btn.small { font-size: 0.8rem; padding: 0.4rem 0.7rem; }
+  .btn.icon { width: 2.6rem; height: 2.6rem; font-size: 1.1rem; }
+  .switch { width: 44px; height: 24px; }
+  .switch .track::after { width: 18px; height: 18px; }
+  .switch input:checked ~ .track::after { transform: translateX(20px); }
+  input[type='range'] { height: 28px; }
+  input[type='range']::-webkit-slider-thumb { width: 18px; height: 18px; margin-top: -7.5px; }
+  input[type='range']::-moz-range-thumb { width: 18px; height: 18px; }
 }
 
 /* Subtle scrollbars */
