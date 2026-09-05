@@ -31,6 +31,9 @@ export function plotTheme() {
     tagBorder: v('--plot-tag-border', 'rgba(158,178,216,0.3)'),
     persistColor: v('--plot-persist-color', 'rgba(63,232,210,0.05)'),
     persistComp: v('--plot-persist-comp', 'lighter'),
+    bg: v('--bg-inset', '#0a0d14'),
+    rubber: v('--plot-rubber', 'rgba(56,225,200,0.08)'),
+    rubberLine: v('--plot-rubber-line', 'rgba(56,225,200,0.4)'),
   };
   return cachedTheme;
 }
@@ -59,6 +62,31 @@ export function fmtVal(v) {
   if (a >= 100) return v.toFixed(0);
   if (a >= 1) return +v.toFixed(2) + '';
   return +v.toFixed(4) + '';
+}
+
+/**
+ * Plot margins for a canvas of w x h CSS px.
+ * - wide (default): tick labels outside, axis titles on both axes
+ * - compact (narrow viewport): no x title; the unit goes at the end of the
+ *   tick row; y title kept (landscape)
+ * - yInside (narrow portrait): y tick labels drawn inside the plot at the
+ *   left edge with a halo; the y quantity becomes a top-left corner label
+ * @returns {{m:{l:number,r:number,t:number,b:number}, rect:{x:number,y:number,w:number,h:number}, compact:boolean, yInside:boolean, xTitle:boolean, yTitle:boolean}}
+ */
+export function plotLayout(w, h, { compact = false, yInside = false } = {}) {
+  const m = yInside
+    ? { l: 10, r: 10, t: 12, b: 26 }
+    : compact
+      ? { l: 58, r: 12, t: 12, b: 26 }
+      : { l: 58, r: 14, t: 14, b: 40 };
+  return {
+    m,
+    rect: { x: m.l, y: m.t, w: w - m.l - m.r, h: h - m.t - m.b },
+    compact,
+    yInside,
+    xTitle: !compact,
+    yTitle: !yInside,
+  };
 }
 
 export class Axes {
@@ -161,7 +189,10 @@ export class Axes {
   /**
    * Draw grid, frame and tick labels.
    * @param {CanvasRenderingContext2D} ctx
-   * @param {object} opts { xLabel, yLabel, xFmt, yFmt, theme }
+   * @param {object} opts { xLabel, yLabel, xFmt, yFmt, theme, yInside, xTitle, yTitle, xUnit }
+   *   yInside: y tick labels inside the plot (phone portrait); xTitle/yTitle
+   *   false suppress the axis titles; xUnit is drawn at the right end of
+   *   the x tick row when there is no x title.
    */
   draw(ctx, opts = {}) {
     const t = { ...plotTheme(), ...(opts.theme || {}) };
@@ -210,6 +241,9 @@ export class Axes {
     ctx.strokeRect(Math.round(rx) + 0.5, Math.round(ry) + 0.5, Math.round(w) - 1, Math.round(h) - 1);
 
     // labels
+    const yInside = !!opts.yInside;
+    const xTitle = opts.xTitle !== false;
+    const yTitle = opts.yTitle !== false && !yInside;
     ctx.fillStyle = t.label;
     ctx.font = t.font;
     ctx.textAlign = 'center';
@@ -218,22 +252,41 @@ export class Axes {
       const px = this.xToPx(v);
       if (px >= rx - 2 && px <= rx + w + 2) ctx.fillText(xFmt(v), px, ry + h + 5);
     }
-    ctx.textAlign = 'right';
-    ctx.textBaseline = 'middle';
-    for (const v of ty.major) {
-      const py = this.yToPx(v);
-      if (py >= ry - 2 && py <= ry + h + 2) ctx.fillText(yFmt(v), rx - 7, py);
+    if (yInside) {
+      // inside the plot, above each grid line, with a halo in the plot ground
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.lineWidth = 3;
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = t.bg;
+      for (const v of ty.major) {
+        const py = this.yToPx(v);
+        if (py < ry + 22 || py > ry + h - 4) continue; // keep clear of the corner label
+        ctx.strokeText(yFmt(v), rx + 5, py - 7);
+        ctx.fillText(yFmt(v), rx + 5, py - 7);
+      }
+    } else {
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
+      for (const v of ty.major) {
+        const py = this.yToPx(v);
+        if (py >= ry - 2 && py <= ry + h + 2) ctx.fillText(yFmt(v), rx - 7, py);
+      }
     }
 
-    // axis titles
+    // axis titles / units
     ctx.fillStyle = t.title;
     ctx.font = t.titleFont;
-    if (opts.xLabel) {
+    if (opts.xLabel && xTitle) {
       ctx.textAlign = 'center';
       ctx.textBaseline = 'bottom';
       ctx.fillText(opts.xLabel.toUpperCase(), rx + w / 2, ry + h + 34);
+    } else if (opts.xUnit) {
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'top';
+      ctx.fillText(opts.xUnit, rx + w, ry + h + 5);
     }
-    if (opts.yLabel) {
+    if (opts.yLabel && yTitle) {
       ctx.save();
       ctx.translate(rx - 44, ry + h / 2);
       ctx.rotate(-Math.PI / 2);
@@ -241,6 +294,13 @@ export class Axes {
       ctx.textBaseline = 'top';
       ctx.fillText(opts.yLabel.toUpperCase(), 0, 0);
       ctx.restore();
+    } else if (opts.yLabel && yInside) {
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = t.bg;
+      ctx.strokeText(opts.yLabel.toUpperCase(), rx + 5, ry + 4);
+      ctx.fillText(opts.yLabel.toUpperCase(), rx + 5, ry + 4);
     }
     ctx.restore();
   }
