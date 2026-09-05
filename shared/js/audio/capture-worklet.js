@@ -9,8 +9,12 @@ class CaptureProcessor extends AudioWorkletProcessor {
     this.fill = 0;
   }
 
-  process(inputs) {
+  process(inputs, outputs) {
     const input = inputs[0];
+    // pass the signal through so the monitor gain (demo "Listen") has audio
+    if (input && input.length > 0 && outputs[0] && outputs[0].length > 0) {
+      outputs[0][0].set(input[0]);
+    }
     if (input && input.length > 0) {
       const ch = input[0];
       let i = 0;

@@ -3,9 +3,11 @@
 // high frequencies stay responsive.
 //
 // Stage sizes are N, 4N, 16N samples at the full sample rate. Stage k
-// covers frequencies up to (fs/2)/4^k, so at each region boundary the
-// relative resolution df/f is continuous: crossing down a boundary swaps
-// to 4x finer bins at 1/4 the frequency.
+// covers frequencies up to (fs/2)/4^k, so every region spans the same
+// range of relative resolution: df/f = 2/N at the top of a region and 8/N
+// at its bottom. At each boundary the resolution jumps by 4x (the dashed
+// lines in the display); the echo lines carry each stage past its boundary
+// so the eye can follow the level across the jump.
 //
 // Each stage has its own window correction, averaging state and peak hold;
 // the longer stages are recomputed at a reduced cadence to bound CPU cost.

@@ -12,6 +12,7 @@ export class PlotInteraction {
    *   onXRange(min, max)  — user changed the x range
    *   onReset()           — user requested reset (double-click/tap)
    *   onHover(px, py|null)— pointer moved (CSS px, relative to canvas), null = left
+   *   onTap(px, py)       — pointer released without dragging or pinching
    */
   constructor(el, axes, cb = {}) {
     this.el = el;
@@ -44,9 +45,11 @@ export class PlotInteraction {
     const p = this.#pos(e);
     try { this.el.setPointerCapture(e.pointerId); } catch { /* synthetic pointer */ }
     this.pointers.set(e.pointerId, p);
+    this.tapCandidate = this.pointers.size === 1;
 
     if (this.pointers.size === 2) {
       // enter pinch mode, cancel rubber band
+      this.tapCandidate = false;
       this.drag = null;
       const [a, b] = [...this.pointers.values()];
       this.pinch = {
@@ -126,14 +129,21 @@ export class PlotInteraction {
   #up(e) {
     this.pointers.delete(e.pointerId);
     if (this.pointers.size < 2) this.pinch = null;
+    let tapped = this.tapCandidate && this.pointers.size === 0;
+    this.tapCandidate = false;
     if (this.drag) {
       const { x0, x1, moved } = this.drag;
       this.drag = null;
+      if (moved) tapped = false;
       if (moved && Math.abs(x1 - x0) > 12) {
         const min = this.axes.pxToX(Math.min(x0, x1));
         const max = this.axes.pxToX(Math.max(x0, x1));
         this.cb.onXRange?.(min, max);
       }
+    }
+    if (tapped) {
+      const p = this.#pos(e);
+      this.cb.onTap?.(p.x, p.y);
     }
   }
 

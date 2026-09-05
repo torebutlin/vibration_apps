@@ -15,7 +15,8 @@ const GENERATORS = {
   hamming: (i, n) => 0.54 - 0.46 * Math.cos((2 * Math.PI * i) / n),
   blackman: (i, n) =>
     0.42 - 0.5 * Math.cos((2 * Math.PI * i) / n) + 0.08 * Math.cos((4 * Math.PI * i) / n),
-  // SFT3F flat-top (ISO 18431-2 style): near-zero amplitude error at peaks
+  // Flat-top (MATLAB flattopwin coefficients, ENBW ≈ 3.77 bins): near-zero
+  // amplitude error at peaks
   flattop: (i, n) => {
     const x = (2 * Math.PI * i) / n;
     return 0.21557895

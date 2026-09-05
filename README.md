@@ -71,5 +71,7 @@ npm test        # = node --test tests/
   amplitude spectra read sine peak (or RMS) amplitude directly; PSD is
   one-sided in FS²/Hz. Levels are dBFS — mics are uncalibrated.
 - **Multi-resolution**: the spectrum's multi-res mode stitches 3 FFT
-  lengths (N, 4N, 16N) with boundaries at fs/8 and fs/32; the
-  spectrogram's wavelet mode is a Morlet CWT computed in a Web Worker.
+  lengths (N, 4N, 16N) with boundaries at fs/8 and fs/32, so every region
+  spans the same range of relative resolution (Δf/f from 2/N to 8/N) and
+  the resolution jumps by 4× at each boundary; the spectrogram's wavelet
+  mode is a Morlet CWT computed in a Web Worker.

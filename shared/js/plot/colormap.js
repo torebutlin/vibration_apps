@@ -49,10 +49,12 @@ const luts = new Map();
  * @param {string} name viridis | inferno | magma | plasma
  * @param {boolean} reversed true for the light-background variant
  *   (low = light, high = dark) used when the UI is in light mode
+ * @param {number[]} ground [r,g,b] 0..255 the reversed variant fades into
+ *   (the page ground), default white
  * @returns {Uint8Array} 256*3 RGB entries
  */
-export function getColormap(name, reversed = false) {
-  const key = reversed ? `${name}_r` : name;
+export function getColormap(name, reversed = false, ground = [255, 255, 255]) {
+  const key = reversed ? `${name}_r_${ground.join(',')}` : name;
   let lut = luts.get(key);
   if (lut) return lut;
   const c = COEFFS[name];
@@ -61,14 +63,14 @@ export function getColormap(name, reversed = false) {
   for (let i = 0; i < 256; i++) {
     const x = i / 255;
     const t = reversed ? 1 - x : x;
-    // light variant: silence is pure white, blending into the (reversed)
-    // map over the first ~12% so the background matches the page
+    // light variant: silence is the page ground, blending into the
+    // (reversed) map over the first ~12% so the background matches the page
     const whiteBlend = reversed ? Math.min(1, x / 0.12) : 1;
     for (let ch = 0; ch < 3; ch++) {
       let v = 0;
       // Horner's rule on c0 + t(c1 + t(c2 + ...))
       for (let k = 6; k >= 0; k--) v = v * t + c[k][ch];
-      v = v * whiteBlend + (1 - whiteBlend);
+      v = v * whiteBlend + (1 - whiteBlend) * (ground[ch] / 255);
       lut[i * 3 + ch] = Math.max(0, Math.min(255, Math.round(v * 255)));
     }
   }
