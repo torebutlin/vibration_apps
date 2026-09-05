@@ -1,9 +1,12 @@
 // Service worker: offline support for the installed app.
 // Strategy: network-first for everything (so students always get the
 // latest version when online), falling back to the cache offline.
-// Bump CACHE_VERSION when shipping changes to force old caches out.
+// Network requests revalidate with the server (cache: 'no-cache') because
+// GitHub Pages sends max-age=600, which otherwise lets a phone keep stale
+// CSS/JS for ten minutes after a deploy. Bump CACHE_VERSION when shipping
+// changes to force old caches out.
 
-const CACHE_VERSION = 'livefft-v13';
+const CACHE_VERSION = 'livefft-v14';
 
 const PRECACHE = [
   './',
@@ -47,7 +50,11 @@ const PRECACHE = [
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_VERSION).then((cache) => cache.addAll(PRECACHE)).then(() => self.skipWaiting())
+    caches
+      .open(CACHE_VERSION)
+      // 'reload' bypasses the HTTP cache so the precache never holds a stale file
+      .then((cache) => cache.addAll(PRECACHE.map((u) => new Request(u, { cache: 'reload' }))))
+      .then(() => self.skipWaiting())
   );
 });
 
@@ -62,8 +69,9 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
+  if (new URL(event.request.url).origin !== self.location.origin) return;
   event.respondWith(
-    fetch(event.request)
+    fetch(event.request.url, { cache: 'no-cache', credentials: 'same-origin' })
       .then((response) => {
         if (response.ok) {
           const copy = response.clone();
