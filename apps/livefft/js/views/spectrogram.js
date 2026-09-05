@@ -12,7 +12,8 @@
 import { rfftMagSq } from '../../../../shared/js/dsp/fft.js';
 import { getWindow } from '../../../../shared/js/dsp/windows.js';
 import { getColormap } from '../../../../shared/js/plot/colormap.js';
-import { Axes, fmtHz, plotTheme } from '../../../../shared/js/plot/axes.js';
+import { Axes, fmtHz, plotTheme, plotLayout } from '../../../../shared/js/plot/axes.js';
+import { rowRanges, rowMax } from '../../../../shared/js/plot/rows.js';
 import { effectiveFreqScale } from '../state.js';
 
 const COLS = 1024;
@@ -58,7 +59,8 @@ export class SpectrogramView {
     this.windowed = null;
     this.power = null;
     this.dbCol = new Float32Array(ROWS);
-    this.rowMap = null;     // row -> source bin/scale index
+    this.rowLo = null;      // per row: inclusive source bin/scale range
+    this.rowHi = null;
 
     this.#rebuild();
     state.on(
@@ -112,6 +114,13 @@ export class SpectrogramView {
     return fr.log ? fr.min * Math.pow(fr.max / fr.min, t) : fr.min + t * (fr.max - fr.min);
   }
 
+  /** Row centre frequencies, top row first. */
+  #rowFreqs(fr) {
+    const out = new Float64Array(ROWS);
+    for (let r = 0; r < ROWS; r++) out[r] = this.#rowFreq(r, fr);
+    return out;
+  }
+
   #clearHistory() {
     this.rawRing.fill(-160);
     this.#applyColormap();
@@ -126,14 +135,12 @@ export class SpectrogramView {
     const freqs = this.cwtFreqs;
     const nS = freqs.length;
     const logMin = Math.log(freqs[0]);
-    const logMax = Math.log(freqs[nS - 1]);
-    for (let r = 0; r < ROWS; r++) {
-      const f = Math.min(Math.max(this.#rowFreq(r, fr), freqs[0]), freqs[nS - 1]);
-      this.rowMap[r] = Math.min(
-        nS - 1,
-        Math.max(0, Math.round(((Math.log(f) - logMin) / (logMax - logMin)) * (nS - 1)))
-      );
-    }
+    const logSpan = Math.log(freqs[nS - 1]) - logMin;
+    const rowFreqs = this.#rowFreqs(fr);
+    for (let r = 0; r < ROWS; r++) rowFreqs[r] = Math.min(Math.max(rowFreqs[r], freqs[0]), freqs[nS - 1]);
+    const { lo, hi } = rowRanges(rowFreqs, (f) => ((Math.log(f) - logMin) / logSpan) * (nS - 1), nS - 1);
+    this.rowLo = lo;
+    this.rowHi = hi;
   }
 
   #rebuild() {
@@ -155,7 +162,6 @@ export class SpectrogramView {
     this.#clearHistory();
 
     const fr = this.#freqRange();
-    this.rowMap = new Float32Array(ROWS);
 
     if (!this.isCwt) {
       const n = s.get('fftSize');
@@ -167,9 +173,9 @@ export class SpectrogramView {
       this.power = new Float64Array(n / 2 + 1);
       if (this.scratch.length < n) this.scratch = new Float32Array(n);
       const binHz = fs / n;
-      for (let r = 0; r < ROWS; r++) {
-        this.rowMap[r] = Math.min(Math.round(this.#rowFreq(r, fr) / binHz), n / 2);
-      }
+      const { lo, hi } = rowRanges(this.#rowFreqs(fr), (f) => f / binHz, n / 2);
+      this.rowLo = lo;
+      this.rowHi = hi;
       if (this.worker) {
         this.worker.terminate();
         this.worker = null;
@@ -236,9 +242,13 @@ export class SpectrogramView {
   }
 
   #applyColormap() {
-    // light theme gets the reversed variant: silence is white, energy dark
+    // light theme gets the reversed variant: silence is the page ground
     const lightBg = document.documentElement.dataset.theme === 'light';
-    this.lut = getColormap(this.state.get('sgColormap'), lightBg);
+    const m = /^#([0-9a-f]{6})$/i.exec(plotTheme().bg);
+    const ground = m
+      ? [parseInt(m[1].slice(0, 2), 16), parseInt(m[1].slice(2, 4), 16), parseInt(m[1].slice(4, 6), 16)]
+      : [255, 255, 255];
+    this.lut = getColormap(this.state.get('sgColormap'), lightBg, ground);
   }
 
   #dbToColor(db) {
@@ -297,8 +307,11 @@ export class SpectrogramView {
     if (this.pendingEndTotal) this.newestColTotal = this.pendingEndTotal;
     for (let c = 0; c < nCols; c++) {
       for (let r = 0; r < ROWS; r++) {
-        const j = this.rowMap[r];
-        const amp = data[j * nCols + c];
+        let amp = 0;
+        for (let j = this.rowLo[r]; j <= this.rowHi[r]; j++) {
+          const a = data[j * nCols + c];
+          if (a > amp) amp = a;
+        }
         this.dbCol[r] = 20 * Math.log10(Math.max(amp, 1e-12));
       }
       this.#writeColumn(this.dbCol);
@@ -321,11 +334,15 @@ export class SpectrogramView {
       this.sinceCol += fresh;
       let toEmit = Math.floor(this.sinceCol / this.colPeriodSamples);
       if (toEmit <= 0) return;
+      // After a stall the current spectrum is duplicated into every due
+      // column (up to a full ring) so the time axis stays true; a backlog
+      // longer than the ring is dropped and the display resumes at real time.
+      if (toEmit > COLS) {
+        this.sinceCol -= (toEmit - COLS) * this.colPeriodSamples;
+        toEmit = COLS;
+      }
       this.sinceCol -= toEmit * this.colPeriodSamples;
       this.newestColTotal = total - this.sinceCol;
-      // catch-up bound: after a stall the current spectrum is duplicated
-      // rather than dropping display time entirely
-      toEmit = Math.min(toEmit, 64);
       const n = this.fftSize;
       const view = this.scratch.subarray(0, n);
       if (!engine.read(n, view)) return;
@@ -335,10 +352,10 @@ export class SpectrogramView {
       rfftMagSq(this.windowed, this.power);
       const nBins = n / 2 + 1;
       for (let r = 0; r < ROWS; r++) {
-        const b = this.rowMap[r];
-        const edge = b === 0 || b === nBins - 1;
-        let amp = this.ampScale * Math.sqrt(Math.max(this.power[b], 0));
-        if (edge) amp /= 2;
+        const p = rowMax(this.power, this.rowLo, this.rowHi, r);
+        const edge = this.rowLo[r] === 0 || this.rowHi[r] === nBins - 1;
+        let amp = this.ampScale * Math.sqrt(Math.max(p, 0));
+        if (edge && this.rowLo[r] === this.rowHi[r]) amp /= 2;
         this.dbCol[r] = 20 * Math.log10(Math.max(amp, 1e-12));
       }
       for (let e = 0; e < toEmit; e++) this.#writeColumn(this.dbCol);
@@ -367,11 +384,11 @@ export class SpectrogramView {
     }
   }
 
-  render(ctx, w, h, hover) {
+  render(ctx, w, h, hover, _rubber, layout = {}) {
     const s = this.state;
     const fr = this.#freqRange();
-    const m = { l: 64, r: 14, t: 14, b: 46 };
-    this.axes.setRect(m.l, m.t, w - m.l - m.r, h - m.t - m.b);
+    const L = plotLayout(w, h, layout);
+    this.axes.setRect(L.rect.x, L.rect.y, L.rect.w, L.rect.h);
     const span = s.get('sgSpan');
     this.axes.setX(-span, 0, false);
     this.axes.setY(fr.min, fr.max, fr.log);
@@ -426,8 +443,12 @@ export class SpectrogramView {
     this.axes.draw(ctx, {
       xLabel: 'time · s',
       yLabel: 'frequency · Hz',
-      xFmt: (v) => (Math.abs(v % 1) < 1e-6 ? v.toFixed(0) : v.toFixed(1)),
+      xFmt: (v) => (L.compact && Math.abs(v) < 1e-6 ? '' : Math.abs(v % 1) < 1e-6 ? v.toFixed(0) : v.toFixed(1)),
+      xUnit: L.compact ? '0 s' : '',
       yFmt: fmtHz,
+      yInside: L.yInside,
+      xTitle: L.xTitle,
+      yTitle: L.yTitle,
       theme: { grid: 'transparent', gridStrong: 'transparent' },
     });
 
@@ -437,7 +458,7 @@ export class SpectrogramView {
     ctx.fillStyle = th.title;
     ctx.textAlign = 'right';
     ctx.textBaseline = 'top';
-    const range = `${s.get('sgFloorDb')}…${s.get('sgCeilDb')} dBFS`;
+    const range = `${s.get('sgFloorDb')}…${s.get('sgCeilDb')} dBFS amplitude`;
     const note = this.isCwt && this.displayDelaySec
       ? `CWT · display −${this.displayDelaySec.toFixed(2)} s · ${range}`
       : range;

@@ -1,7 +1,8 @@
 // Scope view: time-domain trace with optional rising-edge trigger for a
 // stable display, plus RMS / peak level readouts.
 
-import { Axes, plotTheme } from '../../../../shared/js/plot/axes.js';
+import { Axes, plotTheme, plotLayout } from '../../../../shared/js/plot/axes.js';
+import { minMaxEnvelope } from '../../../../shared/js/plot/envelope.js';
 
 export class ScopeView {
   constructor(state) {
@@ -9,8 +10,11 @@ export class ScopeView {
     this.axes = new Axes();
     this.sampleRate = 48000;
     this.buf = new Float32Array(1);
+    this.envMin = new Float32Array(1);
+    this.envMax = new Float32Array(1);
     this.rms = 0;
     this.peak = 0;
+    this.lastTick = 0;
   }
 
   setSampleRate(fs) {
@@ -33,10 +37,14 @@ export class ScopeView {
         const a = Math.abs(v);
         if (a > peak) peak = a;
       }
-      // smooth the readouts a little
+      // smooth the readouts a little, on wall-clock time so the decay does
+      // not depend on the frame rate
+      const now = performance.now();
+      const dt = this.lastTick ? Math.min((now - this.lastTick) / 1000, 0.2) : 0.016;
+      this.lastTick = now;
       const rmsNow = Math.sqrt(sumSq / n);
-      this.rms += 0.3 * (rmsNow - this.rms);
-      this.peak = Math.max(peak, this.peak * 0.94);
+      this.rms += (1 - Math.exp(-dt / 0.05)) * (rmsNow - this.rms);
+      this.peak = Math.max(peak, this.peak * Math.exp(-dt / 0.25));
     }
   }
 
@@ -45,24 +53,23 @@ export class ScopeView {
     if (!this.state.get('scopeTrigger')) return n;
     const buf = this.buf;
     const thresh = Math.max(this.peak * 0.1, 0.005);
-    // search backward from centre for a rising crossing of 0
+    // search backward from centre for a rising crossing of 0 with hysteresis
     for (let i = n; i > 1; i--) {
       if (buf[i - 1] < -thresh * 0.2 && buf[i] >= 0 && buf[i] - buf[i - 1] > 0) {
-        // require signal actually crosses threshold soon after
         return i;
       }
     }
     return n;
   }
 
-  render(ctx, w, h, hover) {
+  render(ctx, w, h, hover, _rubber, layout = {}) {
     const th = plotTheme();
     const span = this.state.get('scopeSpan');
     const n = Math.floor(span * this.sampleRate);
     const useMs = span < 1;
     const xMax = useMs ? span * 1000 : span;
-    const m = { l: 64, r: 14, t: 14, b: 46 };
-    this.axes.setRect(m.l, m.t, w - m.l - m.r, h - m.t - m.b);
+    const L = plotLayout(w, h, layout);
+    this.axes.setRect(L.rect.x, L.rect.y, L.rect.w, L.rect.h);
     this.axes.setX(0, xMax, false);
 
     // y auto: generous headroom, min +-0.01
@@ -70,11 +77,16 @@ export class ScopeView {
     this.axes.setY(-yr, yr, false);
 
     ctx.clearRect(0, 0, w, h);
+    const xFmtFull = (v) => (span < 0.02 || !useMs ? +v.toFixed(1) + '' : v.toFixed(0));
     this.axes.draw(ctx, {
       xLabel: useMs ? 'time · ms' : 'time · s',
       yLabel: 'signal · full scale',
-      xFmt: (v) => (span < 0.02 || !useMs ? +v.toFixed(1) + '' : v.toFixed(0)),
+      xFmt: L.compact ? (v) => (v >= xMax - 1e-9 ? '' : xFmtFull(v)) : xFmtFull,
+      xUnit: L.compact ? (useMs ? 'ms' : 's') : '',
       yFmt: (v) => (yr < 0.1 ? v.toFixed(3) : v.toFixed(2)),
+      yInside: L.yInside,
+      xTitle: L.xTitle,
+      yTitle: L.yTitle,
     });
 
     const r = this.axes.rect;
@@ -95,17 +107,32 @@ export class ScopeView {
     ctx.lineTo(r.x + r.w, zy);
     ctx.stroke();
 
-    // trace: step through samples, decimate to ~2 points per px
     ctx.strokeStyle = th.traceMain;
     ctx.lineWidth = 1.5;
     ctx.lineJoin = 'round';
     ctx.beginPath();
-    const step = Math.max(1, Math.floor(n / (r.w * 2)));
-    for (let i = 0; i < n; i += step) {
-      const px = r.x + (i / n) * r.w;
-      const py = this.axes.yToPx(this.buf[start + i]);
-      if (i === 0) ctx.moveTo(px, py);
-      else ctx.lineTo(px, py);
+    const cols = Math.max(1, Math.round(r.w));
+    if (n > 2 * cols) {
+      // dense: min/max envelope per pixel column (every k-th sample aliases)
+      if (this.envMin.length < cols) {
+        this.envMin = new Float32Array(cols);
+        this.envMax = new Float32Array(cols);
+      }
+      minMaxEnvelope(this.buf, start, n, cols, this.envMin, this.envMax);
+      for (let c = 0; c < cols; c++) {
+        const px = r.x + c + 0.5;
+        const y1 = this.axes.yToPx(this.envMax[c]);
+        const y2 = this.axes.yToPx(this.envMin[c]);
+        if (c === 0) ctx.moveTo(px, y1); else ctx.lineTo(px, y1);
+        ctx.lineTo(px, y2);
+      }
+    } else {
+      for (let i = 0; i < n; i++) {
+        const px = r.x + (i / n) * r.w;
+        const py = this.axes.yToPx(this.buf[start + i]);
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
     }
     ctx.stroke();
     ctx.restore();

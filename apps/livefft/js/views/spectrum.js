@@ -4,7 +4,8 @@
 import { SpectrumProcessor } from '../../../../shared/js/dsp/spectrum.js';
 import { MultiResSpectrum } from '../../../../shared/js/dsp/multires.js';
 import { findPeaks } from '../../../../shared/js/dsp/peaks.js';
-import { Axes, fmtHz, plotTheme } from '../../../../shared/js/plot/axes.js';
+import { Axes, fmtHz, plotTheme, plotLayout } from '../../../../shared/js/plot/axes.js';
+import { FrameHopper } from '../../../../shared/js/dsp/hop.js';
 import { effectiveFreqScale } from '../state.js';
 
 // The spectrum shows PSD only: with averaging off it's the live FFT
@@ -37,6 +38,8 @@ export class SpectrumView {
     this.lastRangeTick = 0;
     this.snapRange = true;      // next frame jumps straight to the required range
     this.dominantPeak = null;   // {freq, db} for the header readout
+    this.hopper = new FrameHopper(2048); // frames advance on samples, not display refresh
+    this.lastProcAt = 0;
     this.#configure();
 
     state.on(['fftSize', 'windowName', 'resMode'], () => this.#configure());
@@ -67,6 +70,7 @@ export class SpectrumView {
     this.peakDisplay = new Float32Array(this.proc.nBins);
     this.instDisplay = new Float32Array(this.proc.nBins);
     this.clearPersistence();
+    this.hopper?.reset();
   }
 
   #applyAveraging() {
@@ -111,10 +115,18 @@ export class SpectrumView {
     return { count: this.proc.avgCount, target: this.proc.linearTarget, done: this.proc.linearDone };
   }
 
-  /** Pull newest samples and update the processors. */
-  tick(engine, dt) {
+  /** Pull newest samples and update the processors, once per hop of new
+   *  samples (50% overlap) so averaging counts data frames, not display
+   *  refreshes. */
+  tick(engine, _dt) {
     const multires = this.state.get('resMode') === 'multires';
     const need = multires ? this.multi.maxSize : this.proc.fftSize;
+    const base = multires ? this.multi.baseSize : this.proc.fftSize;
+    this.hopper.setHop(base >> 1);
+    if (!this.hopper.due(engine.totalSamples)) return;
+    const now = performance.now();
+    const dt = this.lastProcAt ? Math.min((now - this.lastProcAt) / 1000, 0.5) : 0;
+    this.lastProcAt = now;
     if (need > this.scratch.length) this.scratch = new Float32Array(need);
     const view = this.scratch.subarray(0, need);
     if (!engine.read(need, view)) return;
@@ -137,7 +149,7 @@ export class SpectrumView {
     return { min, max, log };
   }
 
-  render(ctx, w, h, hover, rubberBand) {
+  render(ctx, w, h, hover, rubberBand, layout = {}) {
     const s = this.state;
     const dB = s.get('dB');
     const quantity = QUANTITY;
@@ -145,8 +157,8 @@ export class SpectrumView {
     const fr = this.#freqRange();
 
     // layout
-    const m = { l: 64, r: 14, t: 14, b: 46 };
-    this.axes.setRect(m.l, m.t, w - m.l - m.r, h - m.t - m.b);
+    const L = plotLayout(w, h, layout);
+    this.axes.setRect(L.rect.x, L.rect.y, L.rect.w, L.rect.h);
     this.axes.setX(fr.min, fr.max, fr.log);
 
     // gather display data
@@ -221,7 +233,12 @@ export class SpectrumView {
     this.axes.draw(ctx, {
       xLabel: 'frequency · Hz',
       yLabel: qLabel,
+      xFmt: L.compact ? (v) => (v >= fr.max - 1e-6 ? '' : fmtHz(v)) : undefined,
+      xUnit: L.compact ? 'Hz' : '',
       yFmt: dB ? (v) => v.toFixed(0) : undefined,
+      yInside: L.yInside,
+      xTitle: L.xTitle,
+      yTitle: L.yTitle,
     });
 
     const r = this.axes.rect;
@@ -300,7 +317,7 @@ export class SpectrumView {
     ctx.restore();
 
     // trace legend (top-left) — identifies average / live / peak hold
-    if (legend.length > 1 || s.get('peakHold')) this.#drawLegend(ctx, legend, th);
+    if (legend.length > 1 || s.get('peakHold')) this.#drawLegend(ctx, legend, th, L.yInside);
 
     // peak labels follow the slowest-changing trace: the held maxima when
     // peak hold is on, otherwise the displayed (averaged or live) spectrum
@@ -312,8 +329,8 @@ export class SpectrumView {
 
     // rubber band
     if (rubberBand) {
-      ctx.fillStyle = 'rgba(56, 225, 200, 0.08)';
-      ctx.strokeStyle = 'rgba(56, 225, 200, 0.4)';
+      ctx.fillStyle = th.rubber;
+      ctx.strokeStyle = th.rubberLine;
       const x0 = Math.max(rubberBand.x0, r.x);
       const x1 = Math.min(rubberBand.x1, r.x + r.w);
       ctx.fillRect(x0, r.y, x1 - x0, r.h);
@@ -354,14 +371,15 @@ export class SpectrumView {
     return current + (1 - Math.exp(-dt / 2.5)) * (required - current);
   }
 
-  #drawLegend(ctx, entries, th) {
+  #drawLegend(ctx, entries, th, bottom = false) {
     const r = this.axes.rect;
     ctx.save();
     ctx.font = '500 10px "JetBrains Mono", monospace';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     let x = r.x + 12;
-    const y = r.y + 12;
+    // bottom-left when the y labels are inside (the top-left holds the quantity)
+    const y = bottom ? r.y + r.h - 10 : r.y + 12;
     for (const e of entries) {
       ctx.strokeStyle = e.color;
       ctx.lineWidth = 2;
