@@ -1,30 +1,36 @@
-/* Live FFT app layout: header / plot stage / control panel.
-   Desktop: sidebar right. Narrow screens: slide-over drawer. */
+/* Live FFT app layout.
+   Wide (> 860 px): header row, plot stage, settings rail on the right.
+   Narrow: the plot is the screen; header actions float over it as pills
+   and the settings rail becomes a bottom sheet. Only the canvas frame
+   boxes anything. */
 
 html, body { height: 100%; overflow: hidden; }
+
+/* safe-area insets readable from JS (main.js reserves plot margins with them) */
+:root {
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+}
 
 #app {
   display: grid;
   grid-template-areas:
     'topbar topbar'
     'stage panel';
-  grid-template-rows: auto 1fr;
-  grid-template-columns: 1fr auto;
+  grid-template-rows: 48px 1fr;
+  grid-template-columns: 1fr 272px;
   height: 100dvh;
 }
 
-/* ---------- Top bar ---------- */
+/* ---------- Header ---------- */
 
 #topbar {
   grid-area: topbar;
   display: flex;
   align-items: center;
-  gap: 1rem;
-  padding: 0.5rem 0.9rem;
-  border-bottom: 1px solid var(--line);
-  background:
-    radial-gradient(120% 180% at 0% 0%, rgba(56, 225, 200, 0.05), transparent 45%),
-    var(--bg-panel);
+  gap: 1.2rem;
+  padding: 0 0.6rem 0 1.1rem;
+  background: var(--bg-panel);
 }
 
 #brand {
@@ -35,7 +41,7 @@ html, body { height: 100%; overflow: hidden; }
 }
 
 #brand-name {
-  font-size: 1.25rem;
+  font-size: 1.15rem;
   font-weight: 700;
   letter-spacing: 0.16em;
   color: var(--text);
@@ -63,8 +69,12 @@ body.running #brand-name::after {
   50% { opacity: 0.45; }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  body.running #brand-name::after { animation: none; }
+}
+
 #brand-sub {
-  font-size: 0.62rem;
+  font-size: 0.6rem;
   font-weight: 600;
   letter-spacing: 0.34em;
   text-transform: uppercase;
@@ -72,39 +82,30 @@ body.running #brand-name::after {
   margin-top: 3px;
 }
 
-#view-tabs { margin-left: 0.4rem; }
-
 #topbar-right {
   margin-left: auto;
   display: flex;
   align-items: center;
-  gap: 0.8rem;
+  gap: 0.15rem;
 }
 
-#btn-run { min-width: 6.2rem; }
+#lamp-clip { margin-right: 0.6rem; }
+#btn-run { min-width: 6.2rem; margin-left: 0.6rem; }
 #btn-panel { display: none; }
 
 /* ---------- Stage ---------- */
 
 #stage {
   grid-area: stage;
-  display: flex;
-  flex-direction: column;
+  position: relative;
   min-width: 0;
   min-height: 0;
-  padding: 0.8rem 0.4rem 0.4rem 0.8rem;
 }
 
 #plot-wrap {
-  position: relative;
-  flex: 1;
-  min-height: 0;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background:
-    radial-gradient(90% 90% at 50% 10%, rgba(56, 225, 200, 0.025), transparent 60%),
-    var(--bg-inset);
-  box-shadow: var(--plot-inset-shadow);
+  position: absolute;
+  inset: 0;
+  background: var(--bg-inset);
   overflow: hidden;
 }
 
@@ -116,20 +117,44 @@ body.running #brand-name::after {
   cursor: crosshair;
 }
 
+/* start state: the grid is drawn dimmed behind the empty-state stack */
+#plot-wrap.idle #plot { opacity: 0.55; }
+
+/* readouts in the plot's top-right corner */
+#hud {
+  position: absolute;
+  top: 10px;
+  right: 16px;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+#hud .readout { font-size: 0.74rem; }
+#ro-peak { color: var(--accent); font-size: 0.86rem; }
+
+#btn-settings { display: none; }
+
+/* ---------- Start screen ---------- */
+
 #overlay-msg {
   position: absolute;
   inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  pointer-events: none;
+  padding: 1.5rem;
 }
 
 #overlay-card {
-  max-width: 26rem;
+  display: grid;
+  gap: 0.6rem;
+  justify-items: center;
   text-align: center;
-  padding: 2rem;
-  animation: fade-in 0.8s ease-out;
+  width: min(100%, 18rem);
+  animation: fade-in 0.6s ease-out;
 }
 
 @keyframes fade-in {
@@ -137,56 +162,79 @@ body.running #brand-name::after {
 }
 
 #overlay-card h2 {
-  font-size: 1.5rem;
+  font-size: 1.4rem;
   font-weight: 700;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  margin: 0 0 0.6rem;
+  margin: 0;
   color: var(--text);
 }
 
 #overlay-card p {
-  margin: 0.4rem 0;
+  margin: 0;
   font-size: 0.95rem;
+  line-height: 1.35;
   color: var(--text-dim);
 }
 
-#overlay-card .dim { color: var(--text-faint); font-size: 0.85rem; }
-#overlay-card b { color: var(--accent); }
-
-#statusbar {
-  display: flex;
-  align-items: center;
-  gap: 1.4rem;
-  padding: 0.45rem 0.4rem 0.1rem;
-  overflow-x: auto;
-  white-space: nowrap;
+#overlay-btns {
+  display: grid;
+  gap: 0.5rem;
+  width: 100%;
+  margin-top: 0.5rem;
 }
 
-#statusbar .dim { color: var(--text-faint); margin-left: auto; }
+#overlay-btns .btn { height: 2.75rem; font-size: 0.88rem; }
 
-#ro-peak { color: var(--accent); font-size: 0.95rem; }
+#sel-demo {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: none;
+  text-align: center;
+  text-align-last: center;
+  font-family: var(--font-ui);
+  font-size: 0.88rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  border: 1px solid var(--line);
+  max-width: none;
+  padding: 0 1rem;
+}
 
-/* ---------- Panel ---------- */
+/* ---------- Rail (wide) ---------- */
 
 #panel {
   grid-area: panel;
-  width: 264px;
-  margin: 0.8rem 0.8rem 0.4rem 0.4rem;
+  background: var(--bg-page);
+  border: none;
+  border-left: 1px solid var(--line);
+  border-radius: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+#panel-head { display: none; }
+
+#panel-body {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   scrollbar-gutter: stable;
+  padding: 0.6rem 0.4rem 0.6rem 0;
   display: flex;
   flex-direction: column;
 }
 
-#panel .group { flex: none; }
+#panel .group { flex: none; border: none; padding: 0.55rem 0.9rem 0.7rem 1.1rem; }
+#panel .group + .group { margin-top: 0.35rem; }
 
 /* In the spectrogram view the method + its settings come first, so
    toggling STFT/Wavelet never moves the shared controls below them. */
 #grp-source { order: -2; }
 body[data-view='spectrogram'] #grp-spectrogram { order: -1; }
-
-#panel .group:first-child { border-top: none; }
 
 .fine-print {
   font-size: 0.72rem;
@@ -197,11 +245,18 @@ body[data-view='spectrogram'] #grp-spectrogram { order: -1; }
 
 .fine-print a { color: var(--text-dim); }
 
+#scrim {
+  position: fixed;
+  inset: 0;
+  background: var(--scrim);
+  z-index: 19;
+}
+
 /* ---------- Full-screen view ---------- */
 
 body.fullview #topbar,
 body.fullview #panel,
-body.fullview #statusbar { display: none; }
+body.fullview #btn-settings { display: none; }
 
 body.fullview #app {
   grid-template-areas: 'stage';
@@ -209,13 +264,10 @@ body.fullview #app {
   grid-template-columns: 1fr;
 }
 
-body.fullview #stage { padding: 0; }
-body.fullview #plot-wrap { border: none; border-radius: 0; }
-
 #btn-exit-full {
   position: fixed;
-  top: 0.7rem;
-  right: 0.7rem;
+  top: calc(0.7rem + env(safe-area-inset-top));
+  right: calc(0.7rem + env(safe-area-inset-right));
   z-index: 60;
   background: var(--bg-raised);
   border: 1px solid var(--line);
@@ -235,7 +287,7 @@ body.fullview #plot-wrap { border: none; border-radius: 0; }
 #help-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(4, 6, 10, 0.55);
+  background: var(--scrim);
   backdrop-filter: blur(3px);
   -webkit-backdrop-filter: blur(3px);
   z-index: 50;
@@ -250,7 +302,7 @@ body.fullview #plot-wrap { border: none; border-radius: 0; }
   max-height: min(82dvh, 44rem);
   display: flex;
   flex-direction: column;
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 24px 80px var(--overlay-shadow);
   animation: fade-in 0.2s ease-out;
 }
 
@@ -312,57 +364,204 @@ body.fullview #plot-wrap { border: none; border-radius: 0; }
 #toast {
   position: fixed;
   left: 50%;
-  bottom: 1.4rem;
+  bottom: calc(1.4rem + env(safe-area-inset-bottom));
   transform: translateX(-50%);
   background: var(--bg-raised);
-  border: 1px solid rgba(255, 77, 94, 0.5);
+  border: 1px solid var(--toast-border);
   color: var(--text);
   font-size: 0.85rem;
   padding: 0.55rem 1rem;
   border-radius: var(--radius-sm);
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 6px 24px var(--overlay-shadow);
   z-index: 30;
   max-width: min(90vw, 30rem);
 }
 
-/* ---------- Narrow screens ---------- */
+/* =====================================================================
+   Narrow screens: the plot is the screen, chrome floats over it
+   ===================================================================== */
 
 @media (max-width: 860px) {
-  #app {
-    grid-template-areas:
-      'topbar'
-      'stage';
-    grid-template-columns: 1fr;
+  #app { display: block; height: 100dvh; position: relative; }
+
+  #stage {
+    position: absolute;
+    inset: 0;
+    padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
   }
 
-  #btn-panel { display: inline-block; }
+  #plot-wrap { position: relative; width: 100%; height: 100%; }
 
+  /* header becomes a transparent row of pills over the plot */
+  #topbar {
+    position: absolute;
+    z-index: 5;
+    top: calc(10px + env(safe-area-inset-top));
+    left: calc(12px + env(safe-area-inset-left));
+    right: calc(12px + env(safe-area-inset-right));
+    padding: 0;
+    gap: 8px;
+    background: transparent;
+    pointer-events: none;
+  }
+
+  #topbar > * { pointer-events: auto; }
+  #brand { display: none; }
+  #lamp-clip { display: none; }
+  #btn-help, #btn-full, #btn-theme { display: none; }
+
+  #view-tabs,
+  #hud,
+  #btn-settings,
+  #btn-panel {
+    background: var(--pill);
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+  }
+
+  /* the switcher flexes to whatever width the Start and menu pills leave */
+  #view-tabs { display: flex; flex: 1 1 auto; min-width: 0; padding: 2px; gap: 2px; }
+  #view-tabs label { flex: 1 1 auto; min-width: 0; text-align: center; padding: 0.45rem 0.35rem; font-size: 0.82rem; border-radius: 16px; }
+  #view-tabs input:checked + label { background: var(--accent-dim); color: var(--accent); }
+  #view-tabs input:checked + label::after { display: none; }
+  body.clipping #view-tabs { border-color: var(--danger); box-shadow: 0 0 0 1px var(--danger); }
+
+  #topbar-right { gap: 8px; }
+  #btn-run {
+    flex: none;
+    min-width: 0;
+    margin: 0;
+    height: 36px;
+    padding: 0 0.8rem;
+    border-radius: 18px;
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #06110f;
+    font-size: 0.85rem;
+  }
+  #btn-panel {
+    display: inline-flex;
+    flex: none;
+    width: 40px;
+    height: 40px;
+    color: var(--text);
+    font-size: 1.15rem;
+  }
+
+  /* readouts: bottom-left pill in portrait; JS moves #hud into the header
+     row in landscape (see main.js applyLayout) */
+  #hud {
+    top: auto;
+    right: auto;
+    left: calc(12px + env(safe-area-inset-left));
+    bottom: calc(14px + env(safe-area-inset-bottom));
+    height: 36px;
+    padding: 0 12px;
+    gap: 0.8rem;
+    z-index: 5;
+  }
+  #hud .readout { font-size: 0.72rem; }
+  #ro-peak { font-size: 0.8rem; }
+  #topbar #hud { position: static; height: 36px; }
+  /* portrait: the sample rate goes so the readout pill clears the Settings pill */
+  #stage #hud .readout:first-child { display: none; }
+
+  #btn-settings {
+    display: inline-flex;
+    align-items: center;
+    position: absolute;
+    right: calc(12px + env(safe-area-inset-right));
+    bottom: calc(14px + env(safe-area-inset-bottom));
+    height: 36px;
+    padding: 0 12px;
+    z-index: 5;
+    color: var(--text-dim);
+    font-family: var(--font-ui);
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+
+  body.fullview #hud, body.fullview #topbar { display: none; }
+
+  /* settings: bottom sheet */
   #panel {
     position: fixed;
-    top: 0;
+    left: 0;
     right: 0;
     bottom: 0;
-    width: min(20rem, 88vw);
-    margin: 0;
-    border-radius: 0;
-    border-right: none;
-    transform: translateX(105%);
+    top: auto;
+    height: min(60dvh, 560px);
+    background: var(--sheet);
+    border: none;
+    border-radius: 16px 16px 0 0;
+    box-shadow: var(--sheet-shadow);
+    transform: translateY(105%);
     transition: transform 0.25s ease;
     z-index: 20;
-    box-shadow: -12px 0 40px rgba(0, 0, 0, 0.55);
+    padding-bottom: env(safe-area-inset-bottom);
   }
 
-  body.panel-open #panel { transform: translateX(0); }
+  body.panel-open #panel { transform: translateY(0); }
+  #panel.dragging { transition: none; }
 
-  #stage { padding: 0.6rem 0.6rem 0.3rem; }
-  #brand-sub { display: none; }
-  #brand-name { font-size: 1.05rem; }
-  #view-tabs { margin-left: 0; }
-  #topbar { gap: 0.6rem; flex-wrap: wrap; padding: 0.45rem 0.6rem; }
-  #ro-hint { display: none; }
+  #panel-head { display: block; padding: 8px 12px 0 18px; }
+
+  #panel-handle {
+    display: block;
+    width: 36px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--line-strong);
+    margin: 0 auto 8px;
+  }
+
+  #panel-title { display: flex; align-items: center; gap: 2px; }
+  #panel-title h4 {
+    flex: 1;
+    margin: 0;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+  }
+
+  #panel-tabs { display: flex; gap: 1.1rem; border-bottom: 1px solid var(--line); margin-top: 4px; }
+  #panel-tabs button {
+    background: none;
+    border: none;
+    padding: 0.5rem 0 0.6rem;
+    font-family: var(--font-ui);
+    font-size: 0.95rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: var(--text-dim);
+    cursor: pointer;
+  }
+  #panel-tabs button.on { color: var(--accent); box-shadow: inset 0 -2px 0 var(--accent); }
+
+  #panel-body { padding: 0.2rem 0 0.6rem; overscroll-behavior: contain; }
+  #panel .group { padding: 0.5rem 1.1rem 0.6rem; }
+  #panel .group:not(.tab-on) { display: none; }
+  #grp-source, body[data-view='spectrogram'] #grp-spectrogram { order: 0; }
+
+  #btn-exit-full { opacity: 0.6; }
 }
 
-@media (max-width: 480px) {
-  #btn-run { min-width: 4.4rem; }
-  #statusbar { gap: 0.9rem; }
+/* landscape phone: no bottom row; #hud sits in the header row */
+@media (max-width: 860px) and (orientation: landscape) {
+  #btn-settings { display: none; }
+  #topbar {
+    left: calc(12px + max(env(safe-area-inset-left), 44px));
+    right: calc(12px + max(env(safe-area-inset-right), 44px));
+  }
+  #stage {
+    padding-left: max(env(safe-area-inset-left), 44px);
+    padding-right: max(env(safe-area-inset-right), 44px);
+  }
 }

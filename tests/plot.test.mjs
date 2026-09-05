@@ -33,6 +33,12 @@ test('plotLayout: narrow portrait puts the y labels inside', () => {
   assert.equal(L.yTitle, false);
 });
 
+test('plotLayout: padTop/padBottom reserve room for floating pill rows', () => {
+  const L = plotLayout(390, 844, { compact: true, yInside: true, padTop: 60, padBottom: 62 });
+  assert.deepEqual(L.m, { l: 10, r: 10, t: 72, b: 88 });
+  assert.deepEqual(L.rect, { x: 10, y: 72, w: 370, h: 844 - 72 - 88 });
+});
+
 // ---------- rowRanges / rowMax ----------
 
 test('rowRanges: rows wider than bins cover every bin between the row edges', () => {

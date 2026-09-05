@@ -49,6 +49,7 @@ export const DEFAULTS = {
   scopeTrigger: true,
 
   monitorLevel: 0,
+  settingsTab: 'Analysis',   // active settings-sheet tab on narrow screens
 };
 
 /**

@@ -5,7 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Live FFT — Vibration Apps</title>
   <meta name="description" content="Live FFT / PSD spectrum analyzer with spectrogram and wavelet views. Microphone input, measurement-grade scaling.">
-  <meta name="theme-color" content="#07090f">
+  <meta name="theme-color" content="#0a0d14">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="manifest" href="app.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -21,7 +23,7 @@
         <span id="brand-sub">vibration apps</span>
       </div>
 
-      <nav class="seg" id="view-tabs" aria-label="View">
+      <nav class="seg flat" id="view-tabs" aria-label="View">
         <input type="radio" name="view" value="spectrum" id="view-spectrum">
         <label for="view-spectrum">Spectrum</label>
         <input type="radio" name="view" value="spectrogram" id="view-spectrogram">
@@ -32,38 +34,55 @@
 
       <div id="topbar-right">
         <span class="lamp" id="lamp-clip">CLIP</span>
-        <button class="btn" id="btn-help" aria-label="Explain the current settings" title="What do these settings mean?">?</button>
-        <button class="btn" id="btn-full" aria-label="Full screen" title="Full screen — hide all controls">⤢</button>
-        <button class="btn" id="btn-theme" aria-label="Toggle light/dark theme" title="Light / dark theme">☀</button>
+        <button class="btn ghost icon" id="btn-help" aria-label="Explain the current settings" title="What do these settings mean?">?</button>
+        <button class="btn ghost icon" id="btn-full" aria-label="Full screen" title="Full screen — hide all controls">⤢</button>
+        <button class="btn ghost icon" id="btn-theme" aria-label="Toggle light/dark theme" title="Light / dark theme">☀</button>
         <button class="btn primary" id="btn-run" title="Space bar toggles run/pause">▶ Start</button>
-        <button class="btn" id="btn-panel" aria-label="Toggle controls">☰</button>
+        <button class="btn ghost icon" id="btn-panel" aria-label="Settings" title="Settings">☰</button>
       </div>
     </header>
 
     <main id="stage">
-      <div id="plot-wrap">
+      <div id="plot-wrap" class="idle">
         <canvas id="plot"></canvas>
         <div id="overlay-msg">
           <div id="overlay-card">
-            <h2>Live FFT analyzer</h2>
-            <p>Real-time spectrum, spectrogram and waveform from your microphone,
-               with measurement-grade scaling (dBFS).</p>
-            <p class="dim">Choose a source and press <b>Start</b>. Demo signals work
-               without microphone access.</p>
+            <h2>Live FFT</h2>
+            <p>Spectrum, spectrogram and scope from the microphone, in dBFS.</p>
+            <div id="overlay-btns">
+              <button class="btn solid" id="btn-start-mic">▶ Start · microphone</button>
+              <select id="sel-demo" class="btn ghost" aria-label="Try a demo signal">
+                <option value="" selected disabled>Try a demo signal ▾</option>
+              </select>
+            </div>
           </div>
         </div>
       </div>
-      <div id="statusbar">
+      <div id="hud">
         <span class="readout">fs <b id="ro-fs">—</b><span class="unit"> Hz</span></span>
         <span class="readout">Δf <b id="ro-res">—</b></span>
         <span class="readout" id="ro-avg-wrap" hidden>avg <b id="ro-avg">0</b></span>
         <span class="readout" id="ro-peak-wrap">peak <b id="ro-peak">—</b></span>
-        <span class="readout dim" id="ro-hint">drag to zoom · double-click to reset · space runs</span>
       </div>
+      <button id="btn-settings" aria-label="Settings">⚙ Settings</button>
     </main>
 
-    <aside id="panel" class="panel">
-      <div class="group" id="grp-source">
+    <div id="scrim" hidden></div>
+
+    <aside id="panel" class="panel" aria-label="Settings">
+      <div id="panel-head">
+        <span id="panel-handle" aria-hidden="true"></span>
+        <div id="panel-title">
+          <h4>Settings</h4>
+          <button class="btn ghost icon" id="btn-help2" aria-label="Explain the current settings">?</button>
+          <button class="btn ghost icon" id="btn-full2" aria-label="Full screen">⤢</button>
+          <button class="btn ghost icon" id="btn-theme2" aria-label="Toggle light/dark theme">☀</button>
+          <button class="btn ghost icon" id="btn-panel-close" aria-label="Close settings">✕</button>
+        </div>
+        <nav id="panel-tabs" aria-label="Settings groups"></nav>
+      </div>
+      <div id="panel-body">
+      <div class="group" id="grp-source" data-tab="Source">
         <h3 class="group-title">Source</h3>
         <div class="row">
           <label for="sel-source" data-tip="A microphone (audio processing disabled for measurement), or a built-in demo signal — demos need no mic permission.">Input</label>
@@ -75,7 +94,7 @@
         </div>
       </div>
 
-      <div class="group" data-views="spectrum" id="grp-analysis">
+      <div class="group" data-views="spectrum" id="grp-analysis" data-tab="Analysis">
         <h3 class="group-title">Analysis</h3>
         <div class="row" id="row-fft">
           <label for="sel-fft" data-tip="Samples per FFT. Longer = finer frequency resolution (Δf = fs / N) but slower response to change. Not used by the wavelet spectrogram.">FFT size</label>
@@ -96,7 +115,7 @@
           </select>
         </div>
         <div class="row" data-views="spectrum">
-          <label data-tip="Fixed: one FFT length everywhere. Multi-res: three stitched lengths — N, 4N, 16N from the FFT size (N capped at 8192) — with regions split at fs/8 and fs/32, so Δf/f matches across each boundary. Low frequencies get up to 16× finer bins at the cost of slower response there.">Resolution</label>
+          <label data-tip="Fixed: one FFT length everywhere. Multi-res: three stitched lengths — N, 4N, 16N from the FFT size (N capped at 8192) — with regions split at fs/8 and fs/32. Every region spans the same range of relative resolution (Δf/f from 2/N at its top to 8/N at its bottom) and the resolution jumps by 4× at each dashed boundary. Low frequencies get up to 16× finer bins at the cost of slower response there.">Resolution</label>
           <nav class="seg">
             <input type="radio" name="resmode" value="standard" id="res-standard">
             <label for="res-standard">Fixed</label>
@@ -106,10 +125,10 @@
         </div>
       </div>
 
-      <div class="group" data-views="spectrum">
+      <div class="group" data-views="spectrum" data-tab="Analysis">
         <h3 class="group-title">Averaging</h3>
         <div class="row">
-          <label data-tip="Off: live FFT — each frame is one instantaneous spectrum. Exp: running average with a time constant. Linear: average N spectra then freeze — a Welch PSD measurement.">Mode</label>
+          <label data-tip="Off: live FFT — each frame is one instantaneous spectrum. Exp: running average with a time constant. Linear: average N spectra then freeze — a Welch PSD measurement. Frames advance every half FFT length of new samples (50% overlap), whatever the display rate.">Mode</label>
           <nav class="seg">
             <input type="radio" name="avgmode" value="off" id="avg-off">
             <label for="avg-off">Off</label>
@@ -133,7 +152,7 @@
           <button class="btn small" id="btn-avg-restart">Restart</button>
         </div>
         <div class="row">
-          <label for="sw-peakhold" data-tip="Keeps the maximum of every frequency bin since the last reset — shown as the second (amber) trace. Good for capturing transients.">Peak hold</label>
+          <label for="sw-peakhold" data-tip="Keeps the maximum of the displayed trace since the last reset — shown as the second (amber) trace. With averaging on it holds the averaged level; switch averaging off to catch short transients.">Peak hold</label>
           <span style="display:flex; align-items:center; gap:0.5rem;">
             <span class="switch"><input type="checkbox" id="sw-peakhold"><span class="track"></span></span>
             <button class="btn small" id="btn-peakreset">Reset</button>
@@ -141,7 +160,7 @@
         </div>
       </div>
 
-      <div class="group" data-views="spectrum">
+      <div class="group" data-views="spectrum" data-tab="Display">
         <h3 class="group-title">Display</h3>
         <div class="row">
           <label for="sw-db" data-tip="Logarithmic amplitude in dB relative to full scale (dBFS). Off = linear amplitude.">dB scale</label>
@@ -169,7 +188,7 @@
         </div>
       </div>
 
-      <div class="group" data-views="spectrum spectrogram">
+      <div class="group" data-views="spectrum spectrogram" data-tab="Axes">
         <h3 class="group-title">Frequency axis</h3>
         <div class="row">
           <label data-tip="Log spreads the octaves evenly — each doubling of frequency gets equal width. Auto matches the analysis: log for wavelet and multi-res (frequency-proportional resolution), linear for STFT and fixed FFT.">Scale</label>
@@ -196,7 +215,7 @@
         </div>
       </div>
 
-      <div class="group" data-views="spectrum">
+      <div class="group" data-views="spectrum" data-tab="Axes">
         <h3 class="group-title">Amplitude axis</h3>
         <div class="row">
           <label for="sw-ampauto" data-tip="Follows the signal level automatically. Turn off to set a fixed dB range.">Auto range</label>
@@ -211,7 +230,7 @@
         </div>
       </div>
 
-      <div class="group" data-views="spectrogram" id="grp-spectrogram">
+      <div class="group" data-views="spectrogram" id="grp-spectrogram" data-tab="Spectrogram">
         <h3 class="group-title">Spectrogram</h3>
         <div class="row" id="row-sgmethod">
           <label data-tip="STFT: fixed FFT resolution everywhere. Wavelet (Morlet CWT): resolution scales with frequency — sharp in time at high frequency, sharp in frequency at low frequency (constant Q).">Method</label>
@@ -228,7 +247,7 @@
              further down never move when toggling -->
         <div id="cwt-rows" hidden>
           <div class="row">
-            <label for="num-cwtfmin" data-tip="Frequency range the wavelet analysis covers. Lower f min needs longer wavelets, so the display lags a little more.">f min / max</label>
+            <label for="num-cwtfmin" data-tip="Frequency range the wavelet analysis covers. Lower f min needs longer wavelets, so the display lags a little more; phones lag noticeably below about 20 Hz.">f min / max</label>
             <span style="display:flex; gap:0.4rem;">
               <input type="number" id="num-cwtfmin" min="5" step="5" style="width:4.4rem;">
               <input type="number" id="num-cwtfmax" min="100" step="100" style="width:4.4rem;">
@@ -270,18 +289,18 @@
           </select>
         </div>
         <div class="row">
-          <label for="rng-sgfloor" data-tip="Level (dBFS) mapped to the darkest colour — everything quieter is black.">Floor</label>
+          <label for="rng-sgfloor" data-tip="Amplitude level (dBFS) mapped to the darkest colour — everything quieter is black.">Floor</label>
           <input type="range" id="rng-sgfloor" min="-140" max="-40" step="5" style="width: 7rem;">
           <span class="readout" id="ro-sgfloor">-95</span>
         </div>
         <div class="row">
-          <label for="rng-sgceil" data-tip="Level (dBFS) mapped to the brightest colour — everything louder saturates.">Ceiling</label>
+          <label for="rng-sgceil" data-tip="Amplitude level (dBFS) mapped to the brightest colour — everything louder saturates.">Ceiling</label>
           <input type="range" id="rng-sgceil" min="-60" max="0" step="5" style="width: 7rem;">
           <span class="readout" id="ro-sgceil">-15</span>
         </div>
       </div>
 
-      <div class="group" data-views="scope">
+      <div class="group" data-views="scope" data-tab="Scope">
         <h3 class="group-title">Scope</h3>
         <div class="row">
           <label for="sel-scopespan" data-tip="How much of the waveform the display shows.">Time span</label>
@@ -299,13 +318,14 @@
         </div>
       </div>
 
-      <div class="group">
+      <div class="group" data-tab="Source">
         <p class="fine-print">
           Levels are relative to device full scale (dBFS) — microphones are not
           calibrated. Mic processing (AGC, noise suppression) is disabled for
           measurement. Part of
           <a href="../../index.html">Vibration&nbsp;Apps</a>.
         </p>
+      </div>
       </div>
     </aside>
   </div>
@@ -322,6 +342,7 @@
     </div>
   </div>
 
+  <div id="tip" class="tip" hidden></div>
   <div id="toast" hidden></div>
 
   <script type="module" src="js/main.js"></script>

@@ -1,4 +1,5 @@
-// Control panel bindings: DOM <-> State, plus view-dependent visibility.
+// Control panel bindings: DOM <-> State, plus view-dependent visibility,
+// the settings sheet (narrow screens), tabs, and hover tooltips.
 
 import { DEMO_SOURCES } from '../../../shared/js/audio/engine.js';
 import { effectiveFreqScale } from './state.js';
@@ -26,6 +27,10 @@ export function initUI(state, engine, callbacks) {
     gDemo.label = 'Demo signals';
     for (const d of DEMO_SOURCES) gDemo.appendChild(new Option(d.label, d.id));
     selSource.appendChild(gDemo);
+    // the start screen's demo picker lists the same demos
+    const selDemo = $('sel-demo');
+    while (selDemo.options.length > 1) selDemo.remove(1);
+    for (const d of DEMO_SOURCES) selDemo.appendChild(new Option(d.label, d.id));
     // restore selection if still present
     if ([...selSource.options].some((o) => o.value === current)) {
       selSource.value = current;
@@ -302,7 +307,9 @@ export function initUI(state, engine, callbacks) {
       ['Zoom', 'Drag across the spectrum to zoom the frequency axis (pinch on touch). Double-click or double-tap to reset.'],
       ['Readout', 'Move the pointer (or touch) over the plot for a frequency and level readout at the crosshair.'],
       ['Run / pause', 'The Start button, or the space bar. Pausing freezes the display for discussion.'],
-      ['Full screen', 'The ⤢ button hides every control for a clean projected display; ✕ (or Esc) brings them back.'],
+      ['Full screen', 'The ⤢ button hides every control for a clean projected display; ✕ (or Esc) brings them back. On a phone, tap the plot to bring them back.'],
+      ['Levels', 'The spectrum is a density (dBFS per Hz), the spectrogram is amplitude (dBFS). The same tone therefore reads lower on the spectrum — about 15 dB lower at FFT 4096 — and the gap changes with FFT size and window.'],
+      ['Settings', 'On a phone, ☰ or the Settings pill opens the settings sheet; drag it down, tap outside it or press Escape to close.'],
     ]);
 
     for (const group of document.querySelectorAll('#panel .group')) {
@@ -327,20 +334,121 @@ export function initUI(state, engine, callbacks) {
   helpOverlay.addEventListener('click', (e) => {
     if (e.target === helpOverlay) helpOverlay.hidden = true;
   });
-  window.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') helpOverlay.hidden = true;
-  });
 
-  // ---------- panel drawer (mobile) ----------
-  $('btn-panel').addEventListener('click', () => {
-    document.body.classList.toggle('panel-open');
-  });
-  // close drawer when tapping the stage
-  $('plot-wrap').addEventListener('pointerdown', () => {
+  // ---------- settings sheet (narrow) / rail (wide) ----------
+  const panel = $('panel');
+  const scrim = $('scrim');
+
+  function openPanel() {
+    document.body.classList.add('panel-open');
+    scrim.hidden = false;
+  }
+
+  function closePanel() {
     document.body.classList.remove('panel-open');
+    scrim.hidden = true;
+  }
+
+  $('btn-panel').addEventListener('click', () => {
+    if (document.body.classList.contains('panel-open')) closePanel(); else openPanel();
+  });
+  $('btn-settings').addEventListener('click', openPanel);
+  $('btn-panel-close').addEventListener('click', closePanel);
+  scrim.addEventListener('click', closePanel);
+  $('plot-wrap').addEventListener('pointerdown', closePanel);
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      helpOverlay.hidden = true;
+      closePanel();
+    }
   });
 
-  return { populateSources };
+  // drag the sheet down to close
+  const head = $('panel-head');
+  let dragY = null;
+  head.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('button')) return;
+    dragY = e.clientY;
+    panel.classList.add('dragging');
+    head.setPointerCapture(e.pointerId);
+  });
+  head.addEventListener('pointermove', (e) => {
+    if (dragY === null) return;
+    const dy = Math.max(0, e.clientY - dragY);
+    panel.style.transform = `translateY(${dy}px)`;
+  });
+  const endDrag = (e) => {
+    if (dragY === null) return;
+    const dy = e.clientY - dragY;
+    dragY = null;
+    panel.classList.remove('dragging');
+    panel.style.transform = '';
+    if (dy > 80) closePanel();
+  };
+  head.addEventListener('pointerup', endDrag);
+  head.addEventListener('pointercancel', endDrag);
+
+  // tabs: one per data-tab value among the groups visible in this view
+  const TAB_ORDER = ['Analysis', 'Spectrogram', 'Scope', 'Display', 'Axes', 'Source'];
+  const tabsNav = $('panel-tabs');
+
+  function updateTabs() {
+    const groups = [...document.querySelectorAll('#panel .group')];
+    const present = new Set(groups.filter((g) => !g.hidden).map((g) => g.dataset.tab));
+    const tabs = TAB_ORDER.filter((t) => present.has(t));
+    let active = state.get('settingsTab');
+    if (!tabs.includes(active)) active = tabs[0];
+    tabsNav.innerHTML = '';
+    for (const t of tabs) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = t;
+      b.classList.toggle('on', t === active);
+      b.addEventListener('click', () => state.set('settingsTab', t));
+      tabsNav.appendChild(b);
+    }
+    for (const g of groups) g.classList.toggle('tab-on', g.dataset.tab === active);
+  }
+
+  state.on(['settingsTab', 'view'], updateTabs);
+  updateTabs();
+
+  // the sheet's title row repeats the header actions that hide on narrow screens
+  $('btn-help2').addEventListener('click', () => $('btn-help').click());
+  $('btn-theme2').addEventListener('click', () => $('btn-theme').click());
+  $('btn-full2').addEventListener('click', () => {
+    closePanel();
+    $('btn-full').click();
+  });
+
+  // ---------- hover tooltips (JS-positioned so the rail never clips them) ----------
+  if (window.matchMedia('(hover: hover)').matches) {
+    const tip = $('tip');
+    let tipFor = null;
+    document.addEventListener('pointerover', (e) => {
+      const el = e.target.closest?.('[data-tip]');
+      if (!el || el === tipFor) return;
+      tipFor = el;
+      tip.textContent = el.dataset.tip;
+      tip.hidden = false;
+      const r = el.getBoundingClientRect();
+      const tw = tip.offsetWidth;
+      const th = tip.offsetHeight;
+      const x = Math.min(r.left, window.innerWidth - tw - 8);
+      let y = r.bottom + 7;
+      if (y + th > window.innerHeight - 8) y = r.top - th - 7;
+      tip.style.left = `${Math.max(8, x)}px`;
+      tip.style.top = `${Math.max(8, y)}px`;
+    });
+    document.addEventListener('pointerout', (e) => {
+      if (tipFor && !tipFor.contains(e.relatedTarget)) {
+        tipFor = null;
+        tip.hidden = true;
+      }
+    });
+  }
+
+  return { populateSources, closePanel };
 }
 
 /** Transient error/notice toast. */

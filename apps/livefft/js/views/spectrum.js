@@ -317,7 +317,8 @@ export class SpectrumView {
     ctx.restore();
 
     // trace legend (top-left) — identifies average / live / peak hold
-    if (legend.length > 1 || s.get('peakHold')) this.#drawLegend(ctx, legend, th, L.yInside);
+    // bottom-left: the noise floor lives there, whereas peak tags crowd the top
+    if (legend.length > 1 || s.get('peakHold')) this.#drawLegend(ctx, legend, th, true);
 
     // peak labels follow the slowest-changing trace: the held maxima when
     // peak hold is on, otherwise the displayed (averaged or live) spectrum

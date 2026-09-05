@@ -3,7 +3,7 @@
 // latest version when online), falling back to the cache offline.
 // Bump CACHE_VERSION when shipping changes to force old caches out.
 
-const CACHE_VERSION = 'livefft-v12';
+const CACHE_VERSION = 'livefft-v13';
 
 const PRECACHE = [
   './',
@@ -40,6 +40,9 @@ const PRECACHE = [
   '../../shared/js/plot/axes.js',
   '../../shared/js/plot/colormap.js',
   '../../shared/js/plot/interaction.js',
+  '../../shared/js/plot/rows.js',
+  '../../shared/js/plot/envelope.js',
+  '../../shared/js/dsp/hop.js',
 ];
 
 self.addEventListener('install', (event) => {

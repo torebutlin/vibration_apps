@@ -71,14 +71,17 @@ export function fmtVal(v) {
  *   tick row; y title kept (landscape)
  * - yInside (narrow portrait): y tick labels drawn inside the plot at the
  *   left edge with a halo; the y quantity becomes a top-left corner label
+ * - padTop / padBottom: extra margin reserved for chrome that floats over
+ *   the canvas (the pill rows on phones, including safe-area insets)
  * @returns {{m:{l:number,r:number,t:number,b:number}, rect:{x:number,y:number,w:number,h:number}, compact:boolean, yInside:boolean, xTitle:boolean, yTitle:boolean}}
  */
-export function plotLayout(w, h, { compact = false, yInside = false } = {}) {
-  const m = yInside
+export function plotLayout(w, h, { compact = false, yInside = false, padTop = 0, padBottom = 0 } = {}) {
+  const base = yInside
     ? { l: 10, r: 10, t: 12, b: 26 }
     : compact
       ? { l: 58, r: 12, t: 12, b: 26 }
       : { l: 58, r: 14, t: 14, b: 40 };
+  const m = { l: base.l, r: base.r, t: base.t + padTop, b: base.b + padBottom };
   return {
     m,
     rect: { x: m.l, y: m.t, w: w - m.l - m.r, h: h - m.t - m.b },

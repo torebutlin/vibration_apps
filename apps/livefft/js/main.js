@@ -31,6 +31,38 @@ let lastClip = 0;
 let lastFrame = performance.now();
 let started = false;
 
+// ---------- responsive layout ----------
+// narrow: chrome floats over the plot; portrait narrow: y labels inside.
+const mqNarrow = window.matchMedia('(max-width: 860px)');
+const mqPortrait = window.matchMedia('(orientation: portrait)');
+const layout = { compact: false, yInside: false, padTop: 0, padBottom: 0 };
+const hud = document.getElementById('hud');
+const topbar = document.getElementById('topbar');
+const stage = document.getElementById('stage');
+
+// safe-area insets, exposed by app.css as --sat / --sab so the canvas can
+// keep its axes clear of the notch and the home indicator
+function safeInset(name) {
+  return parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name)) || 0;
+}
+
+function applyLayout() {
+  layout.compact = mqNarrow.matches;
+  layout.yInside = mqNarrow.matches && mqPortrait.matches;
+  // on narrow screens the pill rows float over the canvas: reserve their
+  // height (10 px gap + 40 px pill + 10 px gap) so axes and labels stay visible
+  layout.padTop = layout.compact ? 60 + safeInset('--sat') : 0;
+  layout.padBottom = layout.compact && mqPortrait.matches ? 60 + safeInset('--sab') : 0;
+  // landscape phones carry the readouts in the header row
+  const inHeader = layout.compact && !mqPortrait.matches;
+  if (inHeader && hud.parentElement !== topbar) topbar.insertBefore(hud, document.getElementById('topbar-right'));
+  if (!inHeader && hud.parentElement !== stage) stage.appendChild(hud);
+}
+
+mqNarrow.addEventListener('change', applyLayout);
+mqPortrait.addEventListener('change', applyLayout);
+applyLayout();
+
 // ---------- canvas sizing ----------
 
 function resizeCanvas() {
@@ -70,6 +102,10 @@ const interaction = new PlotInteraction(canvas, views.spectrum.axes, {
   onHover(x, y) {
     hover = x === null ? null : { x, y };
   },
+  onTap() {
+    // on a phone the chrome is hidden in full view; a tap brings it back
+    if (layout.compact && document.body.classList.contains('fullview')) setFullview(false);
+  },
 });
 
 // ---------- engine start / pause ----------
@@ -82,6 +118,7 @@ async function startEngine() {
     engine.setMonitor(source.startsWith('demo-') ? state.get('monitorLevel') : 0);
     started = true;
     overlayMsg.hidden = true;
+    document.getElementById('plot-wrap').classList.remove('idle');
     document.body.classList.add('running');
     btnRun.textContent = '❚❚ Pause';
     // views need the real sample rate
@@ -119,6 +156,17 @@ async function toggleRun() {
 }
 
 btnRun.addEventListener('click', toggleRun);
+
+// start-screen actions: microphone, or a demo signal picked from the list
+document.getElementById('btn-start-mic').addEventListener('click', () => {
+  state.set('source', 'mic');
+  startEngine();
+});
+document.getElementById('sel-demo').addEventListener('change', (e) => {
+  if (!e.target.value) return;
+  state.set('source', e.target.value);
+  startEngine();
+});
 
 window.addEventListener('keydown', (e) => {
   if (e.code === 'Space' && !/^(INPUT|SELECT|TEXTAREA|BUTTON)$/.test(document.activeElement?.tagName)) {
@@ -159,14 +207,26 @@ const btnTheme = document.getElementById('btn-theme');
 // ︎ forces text (not emoji) rendering of the sun/moon glyphs
 const THEME_GLYPH = { dark: '☀︎', light: '☽︎' };
 
+const btnTheme2 = document.getElementById('btn-theme2');
+const metaTheme = document.querySelector('meta[name="theme-color"]');
+
+function syncThemeColor() {
+  // browser chrome / status bar follows the page ground of the active theme
+  if (metaTheme) metaTheme.content = getComputedStyle(document.documentElement).getPropertyValue('--bg-page').trim();
+}
+
 function applyTheme(theme) {
   document.documentElement.dataset.theme = theme;
   try { localStorage.setItem('vibapps-theme', theme); } catch { /* private mode */ }
   btnTheme.textContent = THEME_GLYPH[theme];
+  btnTheme2.textContent = THEME_GLYPH[theme];
+  syncThemeColor();
   window.dispatchEvent(new Event('themechange'));
 }
 
 btnTheme.textContent = THEME_GLYPH[document.documentElement.dataset.theme || 'dark'];
+btnTheme2.textContent = btnTheme.textContent;
+syncThemeColor();
 btnTheme.addEventListener('click', () => {
   applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
 });
@@ -229,7 +289,9 @@ function updateReadouts(now) {
       roRes.textContent = span < 1 ? `${(span * 1000).toFixed(0)} ms` : `${span} s`;
     }
   }
-  lampClip.classList.toggle('on', now - lastClip < 600);
+  const clipping = now - lastClip < 600;
+  lampClip.classList.toggle('on', clipping);
+  document.body.classList.toggle('clipping', clipping);
 }
 
 // ---------- main loop ----------
@@ -242,7 +304,7 @@ function frame(now) {
 
   const view = activeView();
   if (started && engine.running) view.tick(engine, dt);
-  view.render(ctx, cssW, cssH, hover, view === views.spectrum ? interaction.rubberBand : null);
+  view.render(ctx, cssW, cssH, hover, view === views.spectrum ? interaction.rubberBand : null, layout);
   updateReadouts(now);
 }
 
