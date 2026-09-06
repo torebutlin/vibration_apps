@@ -4,7 +4,11 @@
 class CaptureProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
-    this.batchSize = 2048; // ~23 messages/s at 48 kHz
+    // 1024 samples = 8 render quanta, ~47 messages/s at 48 kHz. This sets
+    // the pace of every view: the sample count only advances when a batch
+    // lands, so a larger batch caps the display no matter how short the
+    // analysis frame is.
+    this.batchSize = 1024;
     this.buffer = new Float32Array(this.batchSize);
     this.fill = 0;
   }

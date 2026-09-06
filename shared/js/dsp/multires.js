@@ -97,8 +97,9 @@ export class MultiResSpectrum {
    * @param {Float32Array} samples newest samples, length >= maxSize
    * @param {number} dt seconds since last call
    * @param {number} weight independent-frame weight of this call for the
-   *   base stage (1 = hop of half the base window). Stage k runs every 2^k
-   *   calls on a 4^k longer window, so its weight is weight / 2^k.
+   *   base stage (1 = hop of half the base window). Stage k runs every
+   *   `cadence` calls on a 4^k longer window, so one compute of it is
+   *   weight * cadence / 4^k independent frames (2^k for cadence 2^k).
    */
   process(samples, dt, weight = 1) {
     for (let k = 0; k < this.stages.length; k++) {
@@ -121,7 +122,8 @@ export class MultiResSpectrum {
             break;
           case 'linear': {
             const c = s.avgCount;
-            const w = weight / 2 ** k;
+            // this compute covers `cadence` hops of a 4^k longer window
+            const w = (weight * s.cadence) / 4 ** k;
             for (let b = 0; b < nBins; b++) avgPower[b] = (avgPower[b] * c + power[b] * w) / (c + w);
             s.avgCount = c + w;
             break;

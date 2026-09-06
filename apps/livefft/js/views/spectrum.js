@@ -12,11 +12,12 @@ import { freqRange } from '../state.js';
 // (instantaneous periodogram); averaging turns it into a Welch estimate.
 const QUANTITY = 'psd';
 
-// Frames advance every HOP_MAX samples (43 ms at 48 kHz) or every half
+// Frames advance every HOP_MAX samples (21 ms at 48 kHz) or every half
 // FFT if that is shorter, so long FFTs still animate smoothly. Frames
 // closer than half an FFT are correlated, so they count fractionally
-// towards "N averages" (weight = hop / (N/2)).
-const HOP_MAX = 2048;
+// towards "N averages" (weight = hop / (N/2)). Matched to the capture
+// batch, which is what actually paces the display.
+const HOP_MAX = 1024;
 
 function hexToRgba(hex, alpha) {
   const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
@@ -44,7 +45,7 @@ export class SpectrumView {
     this.lastRangeTick = 0;
     this.snapRange = true;      // next frame jumps straight to the required range
     this.dominantPeak = null;   // {freq, db} for the header readout
-    this.hopper = new FrameHopper(2048); // frames advance on samples, not display refresh
+    this.hopper = new FrameHopper(HOP_MAX); // frames advance on samples, not display refresh
     this.lastProcAt = 0;
     this.#configure();
 
