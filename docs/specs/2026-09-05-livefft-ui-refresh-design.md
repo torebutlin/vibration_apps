@@ -228,6 +228,25 @@ the installed app draws under the status bar and the insets do the rest.
   every k-th column and repeats it. No batches, no adaptive margin, no
   gaps. The plot note shows the time-step coarsening when it happens.
 
+## Round 3 (2026-09-06, phone full view and wavelet density)
+
+- Full view on phones: the plot reclaims the pill row. `applyLayout()`
+  drops the 60 px top reservation while `body.fullview` is set (safe-area
+  insets stay), so the frame starts at the top of the screen instead of
+  under an empty band. Wide screens were already filling the stage.
+- Bins / octave gains an Auto entry that follows Wavelet Q. A Morlet
+  wavelet at f responds over a band of width σ_f = f/ω₀; Auto puts two bins
+  across it, B ≈ 2 ω₀ ln 2, i.e. 8 / 16 / 32 per octave for Low / Med /
+  High (`recommendedBinsPerOctave`). Denser only smooths the picture. The
+  matched option reads bold in the list and carries a "fits Q" suffix
+  (phone pickers ignore option styling; the Auto entry also names the
+  value). Picking a number holds it whatever the Q; `cwtBpoAuto` persists.
+- The spectrogram restarts its engine only when the effective settings
+  change (`#configKey`): no worker restart for an FFT-size change in
+  wavelet mode, or a manual bins value while Auto.
+- `State.update()` stores the whole patch before emitting, so listeners
+  see consistent values.
+
 ## Verification
 
 - `npm test` green with the new tests.

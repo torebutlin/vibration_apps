@@ -255,14 +255,11 @@
             </span>
           </div>
           <div class="row">
-            <label for="sel-cwtbpo" data-tip="How densely the frequency axis is sampled with wavelets. The true resolution is set by Wavelet Q — beyond ~32/oct you mostly pay CPU for a smoother picture. A slow device keeps up by computing every second or third column and repeating it (the note in the plot says so).">Bins / octave</label>
-            <select id="sel-cwtbpo">
-              <option>8</option><option>12</option><option>16</option><option>24</option>
-              <option>32</option><option>48</option><option>64</option>
-            </select>
+            <label for="sel-cwtbpo" data-tip="How densely the frequency axis is sampled with wavelets. The resolution itself is set by Wavelet Q: each wavelet responds over a band about f/ω₀ wide, and Auto puts two bins across that band (8, 16 or 32 per octave for Low, Med, High — the option marked in the list). Anything denser only costs CPU for a smoother picture. Pick a number to hold it whatever the Q. A slow device keeps up by computing every second or third column and repeating it (the note in the plot says so).">Bins / octave</label>
+            <select id="sel-cwtbpo"></select>
           </div>
           <div class="row">
-            <label data-tip="Wavelet Q (Morlet ω₀ = 6 / 12 / 24). Higher Q: each wavelet spans more cycles, giving narrower frequency bands but blurrier timing and a longer display delay.">Wavelet Q</label>
+            <label data-tip="Wavelet Q (Morlet ω₀ = 6 / 12 / 24). Higher Q: each wavelet spans more cycles, giving narrower frequency bands but blurrier timing and a longer display delay. Bins / octave follows it while set to Auto.">Wavelet Q</label>
             <nav class="seg">
               <input type="radio" name="cwtq" value="6" id="cwtq-6">
               <label for="cwtq-6">Low</label>

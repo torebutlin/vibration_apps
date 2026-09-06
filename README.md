@@ -58,7 +58,7 @@ DSP code is verified against known signals (Parseval, sine amplitude
 recovery, white-noise PSD levels, wavelet localization):
 
 ```sh
-npm test        # = node --test tests/
+npm test        # = node --test tests/*.test.mjs
 ```
 
 ## Design notes

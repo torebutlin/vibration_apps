@@ -17,7 +17,7 @@ import { getWindow } from '../../../../shared/js/dsp/windows.js';
 import { getColormap } from '../../../../shared/js/plot/colormap.js';
 import { Axes, fmtHz, plotTheme, plotLayout } from '../../../../shared/js/plot/axes.js';
 import { rowRanges, rowMax } from '../../../../shared/js/plot/rows.js';
-import { effectiveFreqScale } from '../state.js';
+import { effectiveFreqScale, effectiveBinsPerOctave } from '../state.js';
 
 const COLS = 1024;
 const ROWS = 512;
@@ -60,9 +60,13 @@ export class SpectrogramView {
     this.rowHi = null;
 
     this.#rebuild();
+    // only settings that change this engine's configuration restart it: the
+    // FFT size is irrelevant to the wavelet, a manual bins value while Auto
     state.on(
-      ['sgMode', 'sgSpan', 'fftSize', 'windowName', 'cwtFMin', 'cwtFMax', 'cwtBinsPerOctave', 'cwtOmega0'],
-      () => this.#rebuild()
+      ['sgMode', 'sgSpan', 'fftSize', 'windowName', 'cwtFMin', 'cwtFMax', 'cwtBinsPerOctave', 'cwtBpoAuto', 'cwtOmega0'],
+      () => {
+        if (this.#configKey() !== this.configKey) this.#rebuild();
+      }
     );
     // axis changes don't need a worker restart in CWT mode — just remap rows
     state.on(['freqScale', 'freqMin', 'freqMax', 'freqAuto'], () => {
@@ -87,6 +91,20 @@ export class SpectrogramView {
 
   get isCwt() {
     return this.state.get('sgMode') === 'cwt';
+  }
+
+  /** Bins per octave in use (Auto follows the Q setting). */
+  get binsPerOctave() {
+    return effectiveBinsPerOctave(this.state);
+  }
+
+  /** The settings the current engine was built from. */
+  #configKey() {
+    const s = this.state;
+    const specific = this.isCwt
+      ? [s.get('cwtFMin'), s.get('cwtFMax'), this.binsPerOctave, s.get('cwtOmega0')]
+      : [s.get('fftSize'), s.get('windowName')];
+    return [s.get('sgMode'), s.get('sgSpan'), this.sampleRate, ...specific].join('|');
   }
 
   /** Display frequency range: manual/auto for STFT, scale range for CWT
@@ -143,6 +161,7 @@ export class SpectrogramView {
   #rebuild() {
     const s = this.state;
     const fs = this.sampleRate;
+    this.configKey = this.#configKey();
     // CWT: the ring must cover span + latency + margin. The latency here is
     // an estimate for sizing; the worker reports the exact latency and the
     // exact column period once configured.
@@ -194,7 +213,7 @@ export class SpectrogramView {
       sampleRate: this.sampleRate,
       fMin: fr.min,
       fMax: fr.max,
-      binsPerOctave: s.get('cwtBinsPerOctave'),
+      binsPerOctave: this.binsPerOctave,
       omega0: s.get('cwtOmega0'),
       hopSamples: Math.round(this.colPeriodSamples),
     });

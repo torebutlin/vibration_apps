@@ -2,7 +2,7 @@
 // the settings sheet (narrow screens), tabs, and hover tooltips.
 
 import { DEMO_SOURCES } from '../../../shared/js/audio/engine.js';
-import { effectiveFreqScale } from './state.js';
+import { effectiveFreqScale, recommendedBinsPerOctave, CWT_BPO_OPTIONS } from './state.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -242,8 +242,33 @@ export function initUI(state, engine, callbacks) {
 
   bindNumber('num-cwtfmin', 'cwtFMin', (v) => Math.max(5, Math.min(v, state.get('cwtFMax') / 4)));
   bindNumber('num-cwtfmax', 'cwtFMax', (v) => Math.max(state.get('cwtFMin') * 4, v));
-  bindSelect('sel-cwtbpo', 'cwtBinsPerOctave', (v) => parseInt(v, 10));
   bindSeg('cwtq', 'cwtOmega0', (v) => parseInt(v, 10));
+
+  // Bins / octave: Auto follows the Q setting (two bins across each
+  // wavelet's band — the option marked in the list); a number holds
+  // whatever the Q. The Auto entry names the value it currently gives so
+  // the match is visible on pickers that ignore option styling (phones).
+  const selBpo = $('sel-cwtbpo');
+  const optAuto = selBpo.appendChild(new Option('Auto', 'auto'));
+  const bpoOpts = CWT_BPO_OPTIONS.map((n) => selBpo.appendChild(new Option(String(n), String(n))));
+
+  function syncBpo() {
+    const rec = recommendedBinsPerOctave(state.get('cwtOmega0'));
+    optAuto.textContent = `Auto · ${rec}`;
+    for (const o of bpoOpts) {
+      const match = +o.value === rec;
+      o.classList.toggle('rec', match);
+      o.textContent = match ? `${o.value} · fits Q` : o.value;
+    }
+    selBpo.value = state.get('cwtBpoAuto') ? 'auto' : String(state.get('cwtBinsPerOctave'));
+  }
+
+  selBpo.addEventListener('change', () => {
+    if (selBpo.value === 'auto') state.set('cwtBpoAuto', true);
+    else state.update({ cwtBpoAuto: false, cwtBinsPerOctave: parseInt(selBpo.value, 10) });
+  });
+  state.on(['cwtOmega0', 'cwtBpoAuto', 'cwtBinsPerOctave'], syncBpo);
+  syncBpo();
 
   function updateCwtRows() {
     const cwt = state.get('sgMode') === 'cwt';

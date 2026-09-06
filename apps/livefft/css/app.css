@@ -175,6 +175,11 @@ body.running #brand-name::after {
 .tool.on { color: var(--amber); border-color: var(--amber); }
 .tool:focus-visible { outline: 2px solid var(--accent-border); outline-offset: 1px; }
 
+/* wavelet bins / octave: the option that matches the Q setting reads bold
+   (desktop pickers; phone pickers ignore option styling, so the Auto entry
+   also names the value) */
+#sel-cwtbpo option.rec { font-weight: 700; }
+
 /* readouts that sit beside a control in the settings (Δf, sample rate) */
 .ctl { display: inline-flex; align-items: center; gap: 0.5rem; min-width: 0; }
 .ctl select { max-width: 8rem; min-width: 0; }

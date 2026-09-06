@@ -46,8 +46,11 @@ function applyLayout() {
   layout.compact = mqNarrow.matches;
   layout.yInside = mqNarrow.matches && mqPortrait.matches;
   // on narrow screens the pill row floats over the canvas: reserve its
-  // height (10 px gap + 40 px pill + 10 px gap) so axes and labels stay visible
-  layout.padTop = layout.compact ? 60 + safeInset('--sat') : 0;
+  // height (10 px gap + 40 px pill + 10 px gap) so axes and labels stay
+  // visible — except in full view, where the pills are gone and the plot
+  // takes the whole screen (inside the safe areas)
+  const pills = document.body.classList.contains('fullview') ? 0 : 60;
+  layout.padTop = layout.compact ? pills + safeInset('--sat') : 0;
   layout.padBottom = layout.compact ? safeInset('--sab') : 0;
 }
 
@@ -200,6 +203,7 @@ const btnFull = document.getElementById('btn-full');
 
 function setFullview(on) {
   document.body.classList.toggle('fullview', on);
+  applyLayout(); // phones: the plot reclaims the pill row
   btnFull.textContent = on ? '✕' : '⤢';
   btnFull.title = on ? 'Exit full screen (Esc)' : 'Full screen — hide all controls';
   btnFull.setAttribute('aria-label', on ? 'Exit full screen' : 'Full screen');
@@ -305,7 +309,7 @@ function updateReadouts(now) {
     if (view === 'spectrogram') {
       const s = views.spectrogram;
       roRes.textContent = s.isCwt
-        ? `CWT ${state.get('cwtBinsPerOctave')}/oct`
+        ? `CWT ${s.binsPerOctave}/oct`
         : fmtRes(engine.sampleRate / state.get('fftSize'));
     } else {
       const span = state.get('scopeSpan');

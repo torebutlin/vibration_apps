@@ -41,7 +41,8 @@ export const DEFAULTS = {
   sgCeilDb: -15,
   cwtFMin: 30,
   cwtFMax: 4000,
-  cwtBinsPerOctave: 16,
+  cwtBinsPerOctave: 16,      // manual value; used when cwtBpoAuto is false
+  cwtBpoAuto: true,          // follow Wavelet Q (see recommendedBinsPerOctave)
   cwtOmega0: 12,
 
   // scope
@@ -64,6 +65,35 @@ export function effectiveFreqScale(state, context) {
   if (v !== 'auto') return v;
   if (context === 'spectrogram') return state.get('sgMode') === 'cwt' ? 'log' : 'linear';
   return state.get('resMode') === 'multires' ? 'log' : 'linear';
+}
+
+/** Bins-per-octave choices offered for the wavelet spectrogram. */
+export const CWT_BPO_OPTIONS = [8, 12, 16, 24, 32, 48, 64];
+
+/**
+ * Scale density that matches the Morlet resolution. A wavelet at centre
+ * frequency f responds over a Gaussian band of width σ_f = f / ω₀, so two
+ * scales per σ_f means a ratio 2^(1/B) = 1 + 1/(2ω₀) between neighbours,
+ * i.e. B ≈ 2 ω₀ ln 2 bins per octave: 8 / 16 / 32 for ω₀ = 6 / 12 / 24.
+ * Denser sampling only smooths the picture — the resolution is set by ω₀.
+ * @param {number} omega0 Morlet parameter
+ * @param {number[]} options offered values; the nearest (in ratio) is returned
+ */
+export function recommendedBinsPerOctave(omega0, options = CWT_BPO_OPTIONS) {
+  const ideal = 1 / Math.log2(1 + 1 / (2 * omega0));
+  let best = options[0];
+  for (const o of options) {
+    if (Math.abs(Math.log(o / ideal)) < Math.abs(Math.log(best / ideal))) best = o;
+  }
+  return best;
+}
+
+/** Bins per octave the wavelet spectrogram actually uses: the Q-matched
+ *  value while Auto, otherwise the manual setting. */
+export function effectiveBinsPerOctave(state) {
+  return state.get('cwtBpoAuto')
+    ? recommendedBinsPerOctave(state.get('cwtOmega0'))
+    : state.get('cwtBinsPerOctave');
 }
 
 export class State {
@@ -89,14 +119,17 @@ export class State {
     this.#save();
   }
 
-  /** Set several keys, emitting once each but saving once. */
+  /** Set several keys, emitting once each but saving once. All values are
+   *  stored before any listener runs, so listeners see the whole patch. */
   update(patch) {
+    const changed = [];
     for (const [k, v] of Object.entries(patch)) {
       if (this.values[k] !== v) {
         this.values[k] = v;
-        this.#emit(k, v);
+        changed.push(k);
       }
     }
+    for (const k of changed) this.#emit(k, this.values[k]);
     this.#save();
   }
 
