@@ -6,7 +6,7 @@
 // CSS/JS for ten minutes after a deploy. Bump CACHE_VERSION when shipping
 // changes to force old caches out.
 
-const CACHE_VERSION = 'livefft-v19';
+const CACHE_VERSION = 'livefft-v20';
 
 const PRECACHE = [
   './',

@@ -154,3 +154,47 @@ test('multires linear averaging weights slower stages by their longer windows', 
   assert.equal(mr.stages[2].avgCount, 2);
   assert.ok(mr.linearProgress.done);
 });
+
+test('multi-res averaging leaves the same noise in every region', () => {
+  // White noise has a flat PSD, so the spread of the averaged trace across
+  // bins is the estimator's own noise. A stage's window is 4^k longer, so
+  // in a given time it sees 4^k fewer independent frames: averaging every
+  // stage over the same seconds leaves the low region several times
+  // noisier than the top, which is what the per-stage time constant fixes.
+  const fs = 48000;
+  const base = 1024;
+  const hop = base / 2;
+  const mr = new MultiResSpectrum({ baseSize: base, windowName: 'hann', sampleRate: fs });
+  mr.setAveraging('exponential', { expTimeConst: 0.5 });
+
+  const ring = new Float32Array(mr.maxSize);
+  const noise = makeNoise(20 * fs, 0.1, 4242);   // 20 s of audio
+  for (let read = 0; read + hop <= noise.length; read += hop) {
+    ring.copyWithin(0, hop);
+    ring.set(noise.subarray(read, read + hop), ring.length - hop);
+    mr.process(ring, hop / fs, 1);
+  }
+
+  // coefficient of variation of the power across bins: 1 for a single
+  // periodogram, 1/sqrt(n) for n independent averages
+  const cv = (stage) => {
+    const hi = Math.min(stage.nBins - 20, Math.floor(stage.fHigh / (fs / stage.size)));
+    let n = 0;
+    let mean = 0;
+    let m2 = 0;
+    for (let b = 20; b <= hi; b++) {
+      const v = stage.avgPower[b];
+      n++;
+      const d = v - mean;
+      mean += d / n;
+      m2 += d * (v - mean);
+    }
+    return Math.sqrt(m2 / (n - 1)) / mean;
+  };
+
+  const [high, mid, low] = mr.stages.map(cv);
+  for (const c of [high, mid, low]) assert.ok(c > 0 && c < 0.5, `implausible spread ${c}`);
+  // without per-stage time constants the ratio is ~3.5
+  assert.ok(low / high < 2, `low region ${(low / high).toFixed(2)}x noisier than the top`);
+  assert.ok(mid / high < 2, `mid region ${(mid / high).toFixed(2)}x noisier than the top`);
+});
