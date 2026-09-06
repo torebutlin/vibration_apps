@@ -2,7 +2,12 @@
 // the settings sheet (narrow screens), tabs, and hover tooltips.
 
 import { DEMO_SOURCES } from '../../../shared/js/audio/engine.js';
-import { effectiveFreqScale, recommendedBinsPerOctave, CWT_BPO_OPTIONS } from './state.js';
+import {
+  effectiveFreqScale,
+  recommendedBinsPerOctave,
+  CWT_BPO_OPTIONS,
+  CWT_FLOOR_HZ,
+} from './state.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -175,7 +180,8 @@ export function initUI(state, engine, callbacks) {
     const auto = state.get('freqAuto');
     const max = state.get('freqMax');
     const min = state.get('freqMin');
-    const isPresetMin = min <= 20.01;
+    // presets start at 0 (linear axis) or the 20 Hz floor (log axis, wavelet)
+    const isPresetMin = min <= CWT_FLOOR_HZ + 0.01;
     const preset = [...selFrange.options].find(
       (o) => o.value !== 'auto' && o.value !== 'custom' && +o.value === max
     );
@@ -196,9 +202,16 @@ export function initUI(state, engine, callbacks) {
     if (selFrange.value === 'auto') {
       state.update({ freqAuto: true });
     } else if (selFrange.value !== 'custom') {
+      // the wavelet has no zero-frequency scale, and neither has a log
+      // axis: those start at the floor, a linear FFT axis at DC
       const context = state.get('view') === 'spectrogram' ? 'spectrogram' : 'spectrum';
+      const cwt = context === 'spectrogram' && state.get('sgMode') === 'cwt';
       const log = effectiveFreqScale(state, context) === 'log';
-      state.update({ freqAuto: false, freqMin: log ? 20 : 0, freqMax: +selFrange.value });
+      state.update({
+        freqAuto: false,
+        freqMin: cwt || log ? CWT_FLOOR_HZ : 0,
+        freqMax: +selFrange.value,
+      });
     }
   });
   state.on(['freqAuto', 'freqMin', 'freqMax'], syncFrange);
@@ -240,8 +253,6 @@ export function initUI(state, engine, callbacks) {
     $('ro-sgceil').textContent = v;
   });
 
-  bindNumber('num-cwtfmin', 'cwtFMin', (v) => Math.max(5, Math.min(v, state.get('cwtFMax') / 4)));
-  bindNumber('num-cwtfmax', 'cwtFMax', (v) => Math.max(state.get('cwtFMin') * 4, v));
   bindSeg('cwtq', 'cwtOmega0', (v) => parseInt(v, 10));
 
   // Bins / octave: Auto follows the Q setting (two bins across each

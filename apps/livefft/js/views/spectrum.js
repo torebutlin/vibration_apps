@@ -6,7 +6,7 @@ import { MultiResSpectrum } from '../../../../shared/js/dsp/multires.js';
 import { findPeaks } from '../../../../shared/js/dsp/peaks.js';
 import { Axes, fmtHz, plotTheme, plotLayout } from '../../../../shared/js/plot/axes.js';
 import { FrameHopper } from '../../../../shared/js/dsp/hop.js';
-import { effectiveFreqScale } from '../state.js';
+import { freqRange } from '../state.js';
 
 // The spectrum shows PSD only: with averaging off it's the live FFT
 // (instantaneous periodogram); averaging turns it into a Welch estimate.
@@ -150,14 +150,7 @@ export class SpectrumView {
 
   /** Current frequency range honouring auto/manual state. */
   #freqRange() {
-    const s = this.state;
-    const fs = this.sampleRate ?? 48000;
-    const log = effectiveFreqScale(s, 'spectrum') === 'log';
-    if (s.get('freqAuto')) return { min: log ? 20 : 0, max: fs / 2, log };
-    let min = s.get('freqMin');
-    let max = Math.min(s.get('freqMax'), fs / 2);
-    if (log) min = Math.max(min, 1);
-    return { min, max, log };
+    return freqRange(this.state, 'spectrum', this.sampleRate ?? 48000);
   }
 
   render(ctx, w, h, hover, rubberBand, layout = {}) {

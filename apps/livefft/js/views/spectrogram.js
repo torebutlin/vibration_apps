@@ -17,7 +17,7 @@ import { getWindow } from '../../../../shared/js/dsp/windows.js';
 import { getColormap } from '../../../../shared/js/plot/colormap.js';
 import { Axes, fmtHz, plotTheme, plotLayout } from '../../../../shared/js/plot/axes.js';
 import { rowRanges, rowMax } from '../../../../shared/js/plot/rows.js';
-import { effectiveFreqScale, effectiveBinsPerOctave } from '../state.js';
+import { freqRange, effectiveBinsPerOctave } from '../state.js';
 
 const COLS = 1024;
 const ROWS = 512;
@@ -63,14 +63,17 @@ export class SpectrogramView {
     // only settings that change this engine's configuration restart it: the
     // FFT size is irrelevant to the wavelet, a manual bins value while Auto
     state.on(
-      ['sgMode', 'sgSpan', 'fftSize', 'windowName', 'cwtFMin', 'cwtFMax', 'cwtBinsPerOctave', 'cwtBpoAuto', 'cwtOmega0'],
+      ['sgMode', 'sgSpan', 'fftSize', 'windowName', 'cwtBinsPerOctave', 'cwtBpoAuto', 'cwtOmega0'],
       () => {
         if (this.#configKey() !== this.configKey) this.#rebuild();
       }
     );
-    // axis changes don't need a worker restart in CWT mode — just remap rows
+    // The wavelet analyses the displayed range, so a new range restarts it;
+    // a lin/log switch only remaps the rows onto the same scales.
     state.on(['freqScale', 'freqMin', 'freqMax', 'freqAuto'], () => {
-      if (this.isCwt && this.workerReady) {
+      if (this.#configKey() !== this.configKey) {
+        this.#rebuild();
+      } else if (this.isCwt && this.workerReady) {
         this.#clearHistory();
         this.#buildCwtRowMap();
       } else {
@@ -98,29 +101,27 @@ export class SpectrogramView {
     return effectiveBinsPerOctave(this.state);
   }
 
-  /** The settings the current engine was built from. */
+  /** The band the wavelet is analysing, for the settings readout. */
+  get cwtRangeText() {
+    const fr = this.#freqRange();
+    return `${fmtHz(fr.min)}–${fmtHz(fr.max)} Hz`;
+  }
+
+  /** The settings the current engine was built from. The wavelet scales
+   *  span the displayed range, so that range is part of its key; the STFT
+   *  bins are the same whatever is on screen. */
   #configKey() {
     const s = this.state;
+    const fr = this.#freqRange();
     const specific = this.isCwt
-      ? [s.get('cwtFMin'), s.get('cwtFMax'), this.binsPerOctave, s.get('cwtOmega0')]
+      ? [fr.min, fr.max, this.binsPerOctave, s.get('cwtOmega0')]
       : [s.get('fftSize'), s.get('windowName')];
     return [s.get('sgMode'), s.get('sgSpan'), this.sampleRate, ...specific].join('|');
   }
 
-  /** Display frequency range: manual/auto for STFT, scale range for CWT
-   *  (which respects the lin/log toggle for display). */
+  /** Displayed frequency range — and, in wavelet mode, the range analysed. */
   #freqRange() {
-    const s = this.state;
-    const log = effectiveFreqScale(s, 'spectrogram') === 'log';
-    if (this.isCwt) {
-      return { min: s.get('cwtFMin'), max: Math.min(s.get('cwtFMax'), this.sampleRate / 2), log };
-    }
-    if (s.get('freqAuto')) return { min: log ? 20 : 0, max: this.sampleRate / 2, log };
-    return {
-      min: log ? Math.max(s.get('freqMin'), 1) : s.get('freqMin'),
-      max: Math.min(s.get('freqMax'), this.sampleRate / 2),
-      log,
-    };
+    return freqRange(this.state, 'spectrogram', this.sampleRate);
   }
 
   /** Frequency at display row r for the current range (row 0 = top = fmax). */
@@ -161,11 +162,12 @@ export class SpectrogramView {
   #rebuild() {
     const s = this.state;
     const fs = this.sampleRate;
+    const fr = this.#freqRange();
     this.configKey = this.#configKey();
     // CWT: the ring must cover span + latency + margin. The latency here is
     // an estimate for sizing; the worker reports the exact latency and the
     // exact column period once configured.
-    const latencyGuess = (4 * s.get('cwtOmega0')) / (2 * Math.PI * s.get('cwtFMin'));
+    const latencyGuess = (4 * s.get('cwtOmega0')) / (2 * Math.PI * fr.min);
     this.displayDelaySec = this.isCwt ? latencyGuess + CWT_MARGIN : 0;
     this.colPeriodSamples =
       ((s.get('sgSpan') + (this.isCwt ? latencyGuess + CWT_MARGIN + 0.5 : 0)) * fs) / COLS;
@@ -174,8 +176,6 @@ export class SpectrogramView {
     this.newestColTotal = 0;
     this.curTotal = 0;
     this.#clearHistory();
-
-    const fr = this.#freqRange();
 
     if (!this.isCwt) {
       const n = s.get('fftSize');

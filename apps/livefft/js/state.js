@@ -22,7 +22,8 @@ export const DEFAULTS = {
   labelSize: 'std',          // std | big (lecture projection)
   persistence: true,
 
-  // frequency axis (shared: spectrum x, spectrogram y)
+  // frequency axis (shared: spectrum x, spectrogram y, and the range the
+  // wavelet spectrogram analyses)
   freqScale: 'auto',         // auto | linear | log
   freqMin: 20,
   freqMax: 5000,
@@ -39,8 +40,6 @@ export const DEFAULTS = {
   sgColormap: 'inferno',
   sgFloorDb: -95,
   sgCeilDb: -15,
-  cwtFMin: 30,
-  cwtFMax: 4000,
   cwtBinsPerOctave: 16,      // manual value; used when cwtBpoAuto is false
   cwtBpoAuto: true,          // follow Wavelet Q (see recommendedBinsPerOctave)
   cwtOmega0: 12,
@@ -65,6 +64,45 @@ export function effectiveFreqScale(state, context) {
   if (v !== 'auto') return v;
   if (context === 'spectrogram') return state.get('sgMode') === 'cwt' ? 'log' : 'linear';
   return state.get('resMode') === 'multires' ? 'log' : 'linear';
+}
+
+/**
+ * Lowest frequency the wavelet spectrogram analyses. The Morlet transform
+ * has no zero-frequency scale, and going lower costs a longer wavelet: the
+ * display trails real time by about 4 sigma = 2 omega0 / (pi f_min). 20 Hz
+ * is the bottom of the audible band and the floor the log axis already
+ * uses, so the range control needs no separate wavelet limit.
+ */
+export const CWT_FLOOR_HZ = 20;
+
+/**
+ * Frequency range for a view: the Range setting, clamped to what the
+ * analysis can deliver. Full is 0..fs/2 (from 20 Hz on a log axis). The
+ * wavelet spectrogram analyses exactly the displayed range, starting no
+ * lower than CWT_FLOOR_HZ whatever the axis scale.
+ * @param {State} state
+ * @param {'spectrum'|'spectrogram'} context
+ * @param {number} sampleRate
+ * @returns {{min: number, max: number, log: boolean}}
+ */
+export function freqRange(state, context, sampleRate = 48000) {
+  const log = effectiveFreqScale(state, context) === 'log';
+  const nyquist = sampleRate / 2;
+  const cwt = context === 'spectrogram' && state.get('sgMode') === 'cwt';
+  let min;
+  let max;
+  if (state.get('freqAuto')) {
+    min = log ? CWT_FLOOR_HZ : 0;
+    max = nyquist;
+  } else {
+    min = state.get('freqMin');
+    max = Math.min(state.get('freqMax'), nyquist);
+  }
+  if (cwt) min = Math.max(min, CWT_FLOOR_HZ);
+  else if (log) min = Math.max(min, 1);
+  // a zoom kept from a higher sample rate can leave the range inverted
+  if (min >= max) min = max / 2;
+  return { min, max, log };
 }
 
 /** Bins-per-octave choices offered for the wavelet spectrogram. */

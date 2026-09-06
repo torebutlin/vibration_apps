@@ -203,7 +203,7 @@
           </nav>
         </div>
         <div class="row">
-          <label for="sel-frange" data-tip="Displayed frequency range. You can also drag on the plot to zoom; double-click to reset.">Range</label>
+          <label for="sel-frange" data-tip="Displayed frequency range, shared by the spectrum and the spectrogram. You can also drag on the spectrum to zoom; double-click to reset. The wavelet spectrogram analyses exactly this range, from 20 Hz up — its longest wavelet, so a wide range costs a longer display delay.">Range</label>
           <select id="sel-frange">
             <option value="auto">Full</option>
             <option value="500">to 500 Hz</option>
@@ -245,21 +245,20 @@
         <!-- method-specific rows sit directly under Method: the FFT size /
              window rows are moved here by ui.js in this view (STFT), and
              the wavelet rows below show in CWT mode — the shared rows
-             further down never move when toggling -->
+             further down never move when toggling. The wavelet's frequency
+             range is the displayed range (Axes → Range), not a setting of
+             its own. -->
         <div id="cwt-rows" hidden>
           <div class="row">
-            <label for="num-cwtfmin" data-tip="Frequency range the wavelet analysis covers. Lower f min needs longer wavelets, so the display trails real time a little more (four wavelet widths at f min).">f min / max</label>
-            <span style="display:flex; gap:0.4rem;">
-              <input type="number" id="num-cwtfmin" min="5" step="5" style="width:4.4rem;">
-              <input type="number" id="num-cwtfmax" min="100" step="100" style="width:4.4rem;">
-            </span>
+            <label data-tip="The band the wavelet covers: exactly the frequency range on display, which you set with Range on the frequency axis. It starts at 20 Hz — the Morlet transform has no zero-frequency scale, and the lowest wavelet in the band sets the display delay.">Analysing</label>
+            <span class="readout aside" id="ro-cwtrange">—</span>
           </div>
           <div class="row">
             <label for="sel-cwtbpo" data-tip="How densely the frequency axis is sampled with wavelets. The resolution itself is set by Wavelet Q: each wavelet responds over a band about f/ω₀ wide, and Auto puts two bins across that band (8, 16 or 32 per octave for Low, Med, High — the option marked in the list). Anything denser only costs CPU for a smoother picture. Pick a number to hold it whatever the Q. A slow device keeps up by computing every second or third column and repeating it (the note in the plot says so).">Bins / octave</label>
             <select id="sel-cwtbpo"></select>
           </div>
           <div class="row">
-            <label data-tip="Wavelet Q (Morlet ω₀ = 6 / 12 / 24). Higher Q: each wavelet spans more cycles, giving narrower frequency bands but blurrier timing and a longer display delay. Bins / octave follows it while set to Auto.">Wavelet Q</label>
+            <label data-tip="Wavelet Q (Morlet ω₀ = 6 / 12 / 24). Higher Q: each wavelet spans more cycles, giving narrower frequency bands but blurrier timing and a longer display delay (four wavelet widths at the bottom of the range). Bins / octave follows it while set to Auto.">Wavelet Q</label>
             <nav class="seg">
               <input type="radio" name="cwtq" value="6" id="cwtq-6">
               <label for="cwtq-6">Low</label>

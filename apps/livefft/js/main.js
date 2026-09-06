@@ -281,6 +281,7 @@ const roAvg = document.getElementById('ro-avg');
 const roAvgWrap = document.getElementById('ro-avg-wrap');
 const roFs2 = document.getElementById('ro-fs2');
 const roRes2 = document.getElementById('ro-res2');
+const roCwtRange = document.getElementById('ro-cwtrange');
 let lastReadout = 0;
 
 function fmtRes(binHz) {
@@ -311,6 +312,8 @@ function updateReadouts(now) {
       roRes.textContent = s.isCwt
         ? `CWT ${s.binsPerOctave}/oct`
         : fmtRes(engine.sampleRate / state.get('fftSize'));
+      // the wavelet band follows the axis range: show what it works out as
+      if (s.isCwt) roCwtRange.textContent = s.cwtRangeText;
     } else {
       const span = state.get('scopeSpan');
       roRes.textContent = span < 1 ? `${(span * 1000).toFixed(0)} ms` : `${span} s`;
