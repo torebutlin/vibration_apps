@@ -313,7 +313,7 @@ function updateReadouts(now) {
         ? `CWT ${s.binsPerOctave}/oct`
         : fmtRes(engine.sampleRate / state.get('fftSize'));
       // the wavelet band follows the axis range: show what it works out as
-      if (s.isCwt) roCwtRange.textContent = s.cwtRangeText;
+      if (s.isCwt && roCwtRange) roCwtRange.textContent = s.cwtRangeText;
     } else {
       const span = state.get('scopeSpan');
       roRes.textContent = span < 1 ? `${(span * 1000).toFixed(0)} ms` : `${span} s`;
@@ -343,10 +343,5 @@ requestAnimationFrame(frame);
 // Debug/testing handle (also handy in the browser console)
 window.__livefft = { engine, state, views, interaction };
 
-// ---------- service worker ----------
-
-if ('serviceWorker' in navigator && location.protocol === 'https:') {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js').catch(() => { /* offline support optional */ });
-  });
-}
+// The service worker is registered by the boot script in index.html, not
+// here: it also has to run when this module fails to load.

@@ -341,5 +341,56 @@
   <div id="toast" hidden></div>
 
   <script type="module" src="js/main.js"></script>
+  <script>
+    // Boot guard. The app is a graph of ES modules served with a ten-minute
+    // HTTP cache, so for a while after a deploy a browser can pair a fresh
+    // file with a cached copy of an older one. A mismatched pair stops the
+    // module graph before the render loop starts: the page looks normal and
+    // nothing ever draws. main.js sets window.__livefft last, so its absence
+    // means the app never booted.
+    //
+    // The cure is the service worker, which revalidates every request and so
+    // always serves one consistent version. Register it here rather than
+    // from main.js (which may be the file that failed), and if the app has
+    // not booted shortly after load, put the page under the worker — or drop
+    // the caches if it is already there — and reload. Once per session, so a
+    // failure that reloading cannot fix does not loop.
+    (function () {
+      var FLAG = 'livefft-reboot';
+      var sw = navigator.serviceWorker;
+      if (sw) window.addEventListener('load', function () { sw.register('sw.js').catch(function () {}); });
+
+      function recover() {
+        try {
+          if (sessionStorage.getItem(FLAG)) return;
+          sessionStorage.setItem(FLAG, '1');
+        } catch (e) { return; }   // private mode: leave the page alone
+        var reload = function () { location.reload(); };
+        if (sw && sw.controller && window.caches) {
+          // controlled and still broken: the cached copies are the mismatch
+          caches.keys()
+            .then(function (keys) { return Promise.all(keys.map(function (k) { return caches.delete(k); })); })
+            .catch(function () {})
+            .then(reload);
+        } else if (sw) {
+          // uncontrolled: the reload lands under the worker, which revalidates
+          sw.register('sw.js').then(function () { return sw.ready; }).catch(function () {}).then(reload);
+        } else {
+          reload();
+        }
+      }
+
+      // poll rather than wait out the whole deadline, so a healthy load
+      // clears the flag straight away and a broken one is caught early
+      window.addEventListener('load', function () {
+        var deadline = Date.now() + 6000;
+        (function check() {
+          if (window.__livefft) { try { sessionStorage.removeItem(FLAG); } catch (e) {} return; }
+          if (Date.now() > deadline) recover();
+          else setTimeout(check, 400);
+        })();
+      });
+    })();
+  </script>
 </body>
 </html>

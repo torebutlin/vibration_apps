@@ -75,9 +75,14 @@ export function initUI(state, engine, callbacks) {
 
   // ---------- generic binders ----------
   // All binders are two-way: control -> state, and state -> control so
-  // programmatic changes keep the panel honest.
+  // programmatic changes keep the panel honest. A binder whose control is
+  // not in the page does nothing: after a deploy a browser can pair this
+  // script with a cached copy of the other version's HTML for as long as
+  // it holds it, and a control that has moved on must not take the app
+  // down with it.
   function bindSelect(id, key, parse = (v) => v) {
     const el = $(id);
+    if (!el) return;
     el.value = String(state.get(key));
     el.addEventListener('change', () => state.set(key, parse(el.value)));
     state.on(key, (v) => { el.value = String(v); });
@@ -85,6 +90,7 @@ export function initUI(state, engine, callbacks) {
 
   function bindSeg(name, key, parse = (v) => v) {
     const inputs = document.querySelectorAll(`input[name="${name}"]`);
+    if (!inputs.length) return;
     for (const input of inputs) {
       input.checked = String(state.get(key)) === input.value;
       input.addEventListener('change', () => {
@@ -98,6 +104,7 @@ export function initUI(state, engine, callbacks) {
 
   function bindSwitch(id, key) {
     const el = $(id);
+    if (!el) return;
     el.checked = state.get(key);
     el.addEventListener('change', () => state.set(key, el.checked));
     state.on(key, (v) => { el.checked = v; });
@@ -105,6 +112,7 @@ export function initUI(state, engine, callbacks) {
 
   function bindNumber(id, key, clamp = (v) => v) {
     const el = $(id);
+    if (!el) return;
     el.value = state.get(key);
     el.addEventListener('change', () => {
       const v = clamp(parseFloat(el.value));
