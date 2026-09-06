@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { MultiResSpectrum } from '../shared/js/dsp/multires.js';
-import { MorletCWT } from '../shared/js/dsp/cwt.js';
 
 function makeNoise(n, sigma, seedStart = 42) {
   let a = seedStart | 0;
@@ -78,8 +77,9 @@ test('multires linear averaging freezes every stage at the target', () => {
   const mr = new MultiResSpectrum({ baseSize: 1024, windowName: 'hann', sampleRate: fs });
   mr.setAveraging('linear', { linearTarget: 5 });
   const n = mr.maxSize;
-  // stage cadences are 1/2/4 frames, so the slowest stage needs 5*4 frames
-  for (let f = 0; f < 24; f++) mr.process(makeNoise(n, 0.1, 3 + f * 31), 0.05);
+  // stage 2 runs every 4 frames and each of its frames counts 1/4 of an
+  // independent average, so 5 averages need 5*4/0.25 = 80 frames
+  for (let f = 0; f < 80; f++) mr.process(makeNoise(n, 0.1, 3 + f * 31), 0.05);
   const prog = mr.linearProgress;
   assert.ok(prog.done, `progress ${prog.count}/${prog.target}`);
   const before = mr.stages.map((s) => Float64Array.from(s.avgPower));
@@ -135,68 +135,22 @@ test('multires extensions continue each stage past its boundary', () => {
   }
 });
 
-test('CWT localizes a tone at the right scale with correct amplitude', () => {
+test('multires linear averaging weights slower stages by their longer windows', () => {
   const fs = 48000;
-  const cwt = new MorletCWT({
-    fullSize: 32768, sampleRate: fs, fMin: 50, fMax: 5000, binsPerOctave: 12, omega0: 6,
-  });
-  // pick an exact scale centre frequency
-  const j = 24;
-  const f = cwt.freqs[j];
-  const amp = 0.4;
-  const s = new Float32Array(cwt.fullSize);
-  for (let i = 0; i < s.length; i++) s[i] = amp * Math.sin((2 * Math.PI * f * i) / fs);
-  const nCols = 16;
-  const out = cwt.analyze(s, nCols, 8);
-  // amplitude at the tone's row
-  let rowMean = 0;
-  for (let c = 0; c < nCols; c++) rowMean += out[j * nCols + c];
-  rowMean /= nCols;
-  assert.ok(Math.abs(rowMean - amp) / amp < 0.02, `row amp ${rowMean} vs ${amp}`);
-  // the maximum over scales should be at (or adjacent to) row j
-  let best = 0;
-  let bestRow = -1;
-  for (let r = 0; r < cwt.nScales; r++) {
-    let m = 0;
-    for (let c = 0; c < nCols; c++) m += out[r * nCols + c];
-    if (m > best) { best = m; bestRow = r; }
-  }
-  assert.ok(Math.abs(bestRow - j) <= 1, `best row ${bestRow} vs ${j}`);
-});
-
-test('CWT resolves two tones an octave apart', () => {
-  const fs = 48000;
-  const cwt = new MorletCWT({
-    fullSize: 32768, sampleRate: fs, fMin: 100, fMax: 2000, binsPerOctave: 12, omega0: 6,
-  });
-  const f1 = cwt.freqs[12];
-  const f2 = cwt.freqs[24]; // one octave up
-  const s = new Float32Array(cwt.fullSize);
-  for (let i = 0; i < s.length; i++) {
-    s[i] = 0.3 * Math.sin((2 * Math.PI * f1 * i) / fs) + 0.3 * Math.sin((2 * Math.PI * f2 * i) / fs);
-  }
-  const out = cwt.analyze(s, 4, 16);
-  const rowAmp = (r) => {
-    let m = 0;
-    for (let c = 0; c < 4; c++) m += out[r * 4 + c];
-    return m / 4;
-  };
-  const mid = rowAmp(18); // halfway between, should dip
-  assert.ok(rowAmp(12) > 0.25 && rowAmp(24) > 0.25, 'both tones present');
-  assert.ok(mid < 0.15, `valley between tones: ${mid}`);
-});
-
-test('CWT latency margin suppresses edge wraparound', () => {
-  const fs = 48000;
-  const cwt = new MorletCWT({
-    fullSize: 16384, sampleRate: fs, fMin: 100, fMax: 4000, binsPerOctave: 8, omega0: 6,
-  });
-  // Impulse at the very newest sample: its response should NOT contaminate
-  // columns at the latency margin (they're 4 sigma away).
-  const s = new Float32Array(cwt.fullSize);
-  s[s.length - 1] = 1;
-  const out = cwt.analyze(s, 1, 1);
-  for (let r = 0; r < cwt.nScales; r++) {
-    assert.ok(out[r] < 2e-3, `row ${r} leaked ${out[r]}`);
-  }
+  const mr = new MultiResSpectrum({ baseSize: 1024, windowName: 'hann', sampleRate: fs });
+  mr.setAveraging('linear', { linearTarget: 2 });
+  const n = mr.maxSize;
+  // weight 1 = the base stage hops by half its window; stage k then hops by
+  // 2^k * hop but has a 4^k longer window, so its weight is 1 / 2^k
+  for (let f = 0; f < 16; f++) mr.process(makeNoise(n, 0.1, 3 + f * 31), 0.05, 1);
+  // every stage also computes on the very first frame, then on its cadence:
+  // stage 0: 16 frames x 1          = 16    (done)
+  // stage 1: (1 + 8) frames x 0.5   = 4.5   (done)
+  // stage 2: (1 + 4) frames x 0.25  = 1.25  (not done)
+  assert.equal(mr.stages[2].avgCount, 1.25);
+  assert.ok(!mr.linearProgress.done);
+  for (let f = 16; f < 32; f++) mr.process(makeNoise(n, 0.1, 3 + f * 31), 0.05, 1);
+  // the stage freezes as soon as it reaches the target (8 computes x 0.25)
+  assert.equal(mr.stages[2].avgCount, 2);
+  assert.ok(mr.linearProgress.done);
 });

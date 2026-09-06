@@ -201,6 +201,33 @@ the installed app draws under the status bar and the insets do the rest.
 `tests/plot.test.mjs` (new: row pooling and layout margins),
 `apps/livefft/sw.js` (bump `CACHE_VERSION`).
 
+## Round 2 (2026-09-06, after Tore tried it on a phone)
+
+- Phones lose the bottom row: no Settings pill (☰ at the top is enough) and
+  no readout pill. Δf sits beside the FFT size control and the sample rate
+  beside the input, on every layout; wide screens keep the corner HUD.
+- Inside y labels (phone portrait) are drawn after the traces with a soft
+  translucent halo, smaller and dimmer than the outside labels, so they
+  read over both trace and spectrogram bands. `Axes.drawInsideLabels()`.
+- Peak hold is a Hold / Reset pill pair at the bottom right of the spectrum
+  plot, not a settings row.
+- One full-screen toggle (⤢ / ✕) at the top right of the plot in every
+  layout replaces the header icon and the exit button.
+- Resume self-heals: `AudioEngine.resume()` rebuilds the graph (new
+  context, new getUserMedia) when the context is closed, will not resume,
+  or the mic track ended; `visibilitychange` calls it on return.
+- Spectrum cadence: frames every 2048 samples (43 ms) or half the FFT if
+  shorter, so long FFTs animate; frames closer than N/2 count fractionally
+  (weight hop/(N/2)) so N averages stay N independent ones. Multi-res stage
+  k weights by 1/2^k on top.
+- Wavelet spectrogram: streaming engine (`StreamingCWT`): anti-alias
+  decimation to ~2.5 x fMax, then each column is a direct correlation of
+  the decimated stream with every scale's wavelet at that instant. Columns
+  arrive one per hop on the audio clock with a fixed latency (4 sigma of
+  the widest wavelet plus the decimator delay); a slow device computes
+  every k-th column and repeats it. No batches, no adaptive margin, no
+  gaps. The plot note shows the time-step coarsening when it happens.
+
 ## Verification
 
 - `npm test` green with the new tests.

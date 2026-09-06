@@ -256,18 +256,7 @@ export class Axes {
       if (px >= rx - 2 && px <= rx + w + 2) ctx.fillText(xFmt(v), px, ry + h + 5);
     }
     if (yInside) {
-      // inside the plot, above each grid line, with a halo in the plot ground
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'middle';
-      ctx.lineWidth = 3;
-      ctx.lineJoin = 'round';
-      ctx.strokeStyle = t.bg;
-      for (const v of ty.major) {
-        const py = this.yToPx(v);
-        if (py < ry + 22 || py > ry + h - 4) continue; // keep clear of the corner label
-        ctx.strokeText(yFmt(v), rx + 5, py - 7);
-        ctx.fillText(yFmt(v), rx + 5, py - 7);
-      }
+      // drawn by drawInsideLabels() after the traces, so the text reads over them
     } else {
       ctx.textAlign = 'right';
       ctx.textBaseline = 'middle';
@@ -297,13 +286,49 @@ export class Axes {
       ctx.textBaseline = 'top';
       ctx.fillText(opts.yLabel.toUpperCase(), 0, 0);
       ctx.restore();
-    } else if (opts.yLabel && yInside) {
-      ctx.textAlign = 'left';
+    }
+    ctx.restore();
+  }
+
+  /**
+   * Y tick labels inside the plot (phone portrait). Call after the traces
+   * are drawn so the text sits on top of them: small, slightly dimmed, with
+   * a soft translucent halo in the plot ground. The quantity name goes in
+   * the top-left corner in the same style.
+   * @param {CanvasRenderingContext2D} ctx
+   * @param {object} opts { yLabel, yFmt, theme }
+   */
+  drawInsideLabels(ctx, opts = {}) {
+    const t = { ...plotTheme(), ...(opts.theme || {}) };
+    const { x: rx, y: ry, h } = this.rect;
+    const yFmt = opts.yFmt || fmtVal;
+    const ty = this.ticksY();
+    ctx.save();
+    ctx.textAlign = 'left';
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = 3.5;
+    ctx.strokeStyle = t.bg;
+    ctx.font = '10px "JetBrains Mono", monospace';
+    ctx.textBaseline = 'middle';
+    for (const v of ty.major) {
+      const py = this.yToPx(v);
+      if (py < ry + 24 || py > ry + h - 4) continue; // keep clear of the corner label
+      const s = yFmt(v);
+      ctx.globalAlpha = 0.75;
+      ctx.strokeText(s, rx + 6, py - 7);
+      ctx.globalAlpha = 0.9;
+      ctx.fillStyle = t.label;
+      ctx.fillText(s, rx + 6, py - 7);
+    }
+    if (opts.yLabel) {
+      const s = opts.yLabel.toUpperCase();
+      ctx.font = t.titleFont;
       ctx.textBaseline = 'top';
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = t.bg;
-      ctx.strokeText(opts.yLabel.toUpperCase(), rx + 5, ry + 4);
-      ctx.fillText(opts.yLabel.toUpperCase(), rx + 5, ry + 4);
+      ctx.globalAlpha = 0.75;
+      ctx.strokeText(s, rx + 6, ry + 5);
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = t.title;
+      ctx.fillText(s, rx + 6, ry + 5);
     }
     ctx.restore();
   }

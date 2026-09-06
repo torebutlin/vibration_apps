@@ -12,6 +12,12 @@ import { effectiveFreqScale } from '../state.js';
 // (instantaneous periodogram); averaging turns it into a Welch estimate.
 const QUANTITY = 'psd';
 
+// Frames advance every HOP_MAX samples (43 ms at 48 kHz) or every half
+// FFT if that is shorter, so long FFTs still animate smoothly. Frames
+// closer than half an FFT are correlated, so they count fractionally
+// towards "N averages" (weight = hop / (N/2)).
+const HOP_MAX = 2048;
+
 function hexToRgba(hex, alpha) {
   const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
   if (!m) return hex;
@@ -111,8 +117,11 @@ export class SpectrumView {
 
   get avgProgress() {
     if (this.state.get('avgMode') !== 'linear') return null;
-    if (this.state.get('resMode') === 'multires') return this.multi.linearProgress;
-    return { count: this.proc.avgCount, target: this.proc.linearTarget, done: this.proc.linearDone };
+    const p = this.state.get('resMode') === 'multires'
+      ? this.multi.linearProgress
+      : { count: this.proc.avgCount, target: this.proc.linearTarget, done: this.proc.linearDone };
+    // counts are fractional (independent-frame weights); show whole averages
+    return { count: Math.floor(p.count + 1e-9), target: p.target, done: p.done };
   }
 
   /** Pull newest samples and update the processors, once per hop of new
@@ -122,7 +131,8 @@ export class SpectrumView {
     const multires = this.state.get('resMode') === 'multires';
     const need = multires ? this.multi.maxSize : this.proc.fftSize;
     const base = multires ? this.multi.baseSize : this.proc.fftSize;
-    this.hopper.setHop(base >> 1);
+    const hop = Math.min(base >> 1, HOP_MAX);
+    this.hopper.setHop(hop);
     if (!this.hopper.due(engine.totalSamples)) return;
     const now = performance.now();
     const dt = this.lastProcAt ? Math.min((now - this.lastProcAt) / 1000, 0.5) : 0;
@@ -130,10 +140,11 @@ export class SpectrumView {
     if (need > this.scratch.length) this.scratch = new Float32Array(need);
     const view = this.scratch.subarray(0, need);
     if (!engine.read(need, view)) return;
+    const weight = hop / (base / 2);
     if (multires) {
-      this.multi.process(view, dt);
+      this.multi.process(view, dt, weight);
     } else {
-      this.proc.process(view, dt);
+      this.proc.process(view, dt, weight);
     }
   }
 
@@ -319,6 +330,9 @@ export class SpectrumView {
     // trace legend (top-left) — identifies average / live / peak hold
     // bottom-left: the noise floor lives there, whereas peak tags crowd the top
     if (legend.length > 1 || s.get('peakHold')) this.#drawLegend(ctx, legend, th, true);
+
+    // inside y labels go over the traces (phone portrait)
+    if (L.yInside) this.axes.drawInsideLabels(ctx, { yLabel: qLabel, yFmt: dB ? (v) => v.toFixed(0) : undefined });
 
     // peak labels follow the slowest-changing trace: the held maxima when
     // peak hold is on, otherwise the displayed (averaged or live) spectrum

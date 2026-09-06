@@ -137,6 +137,14 @@ export class ScopeView {
     ctx.stroke();
     ctx.restore();
 
+    // inside y labels go over the trace (phone portrait)
+    if (L.yInside) {
+      this.axes.drawInsideLabels(ctx, {
+        yLabel: 'signal · full scale',
+        yFmt: (v) => (yr < 0.1 ? v.toFixed(3) : v.toFixed(2)),
+      });
+    }
+
     // level readout
     const rmsDb = 20 * Math.log10(Math.max(this.rms, 1e-9));
     const peakDb = 20 * Math.log10(Math.max(this.peak, 1e-9));

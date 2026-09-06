@@ -130,8 +130,20 @@ export function initUI(state, engine, callbacks) {
   });
   bindSelect('sel-linN', 'linearTarget', (v) => parseInt(v, 10));
   $('btn-avg-restart').addEventListener('click', () => callbacks.onAvgRestart?.());
-  bindSwitch('sw-peakhold', 'peakHold');
-  $('btn-peakreset').addEventListener('click', () => callbacks.onPeakReset?.());
+
+  // ---------- peak hold: a quick toggle on the plot, not in the settings ----------
+  const btnHold = $('btn-peakhold');
+  const btnPeakReset = $('btn-peakreset');
+  const syncPeakTools = () => {
+    const on = state.get('peakHold');
+    btnHold.classList.toggle('on', on);
+    btnHold.setAttribute('aria-pressed', String(on));
+    btnPeakReset.hidden = !on;
+  };
+  btnHold.addEventListener('click', () => state.set('peakHold', !state.get('peakHold')));
+  btnPeakReset.addEventListener('click', () => callbacks.onPeakReset?.());
+  state.on('peakHold', syncPeakTools);
+  syncPeakTools();
 
   function updateAvgRows() {
     const mode = state.get('avgMode');
@@ -306,10 +318,11 @@ export function initUI(state, engine, callbacks) {
     addSection('Plot', [
       ['Zoom', 'Drag across the spectrum to zoom the frequency axis (pinch on touch). Double-click or double-tap to reset.'],
       ['Readout', 'Move the pointer (or touch) over the plot for a frequency and level readout at the crosshair.'],
-      ['Run / pause', 'The Start button, or the space bar. Pausing freezes the display for discussion.'],
-      ['Full screen', 'The ⤢ button hides every control for a clean projected display; ✕ (or Esc) brings them back. On a phone, tap the plot to bring them back.'],
+      ['Run / pause', 'The Start button, or the space bar. Pausing freezes the display for discussion. After the app has been in the background, Resume rebuilds the audio input if the phone shut it down.'],
+      ['Peak hold', 'Hold (bottom right of the spectrum) keeps the maximum of the displayed trace since the last Reset, shown as the amber trace. With averaging on it holds the averaged level; switch averaging off to catch short transients.'],
+      ['Full screen', 'The ⤢ button at the top right of the plot hides every control for a clean projected display; ✕ (or Esc) brings them back. On a phone, tapping the plot also brings them back.'],
       ['Levels', 'The spectrum is a density (dBFS per Hz), the spectrogram is amplitude (dBFS). The same tone therefore reads lower on the spectrum — about 15 dB lower at FFT 4096 — and the gap changes with FFT size and window.'],
-      ['Settings', 'On a phone, ☰ or the Settings pill opens the settings sheet; drag it down, tap outside it or press Escape to close.'],
+      ['Settings', 'On a phone, ☰ opens the settings sheet; drag it down, tap outside it or press Escape to close. Δf sits beside the FFT size, the sample rate beside the input.'],
     ]);
 
     for (const group of document.querySelectorAll('#panel .group')) {
@@ -352,7 +365,6 @@ export function initUI(state, engine, callbacks) {
   $('btn-panel').addEventListener('click', () => {
     if (document.body.classList.contains('panel-open')) closePanel(); else openPanel();
   });
-  $('btn-settings').addEventListener('click', openPanel);
   $('btn-panel-close').addEventListener('click', closePanel);
   scrim.addEventListener('click', closePanel);
   $('plot-wrap').addEventListener('pointerdown', closePanel);
@@ -416,10 +428,6 @@ export function initUI(state, engine, callbacks) {
   // the sheet's title row repeats the header actions that hide on narrow screens
   $('btn-help2').addEventListener('click', () => $('btn-help').click());
   $('btn-theme2').addEventListener('click', () => $('btn-theme').click());
-  $('btn-full2').addEventListener('click', () => {
-    closePanel();
-    $('btn-full').click();
-  });
 
   // ---------- hover tooltips (JS-positioned so the rail never clips them) ----------
   if (window.matchMedia('(hover: hover)').matches) {

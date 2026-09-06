@@ -170,3 +170,32 @@ test('findPeaks labels distinct tones and skips shoulders', () => {
     assert.ok(nearest < proc.binHz, `tone ${t.freq} labelled within a bin (off by ${nearest})`);
   }
 });
+
+test('linear averaging counts fractional frames when hops overlap more than 50%', () => {
+  const fs = 10000;
+  const n = 1024;
+  const proc = new SpectrumProcessor({ fftSize: n, windowName: 'hann', sampleRate: fs });
+  proc.setAveraging('linear', { linearTarget: 4 });
+  // weight 0.5 = frames hop by a quarter of the FFT, so two frames make one independent average
+  for (let seg = 0; seg < 7; seg++) proc.process(makeNoise(n, 0.1, seg * 31 + 7), 0.01, 0.5);
+  assert.equal(proc.avgCount, 3.5);
+  assert.ok(!proc.linearDone, 'not done after 3.5 effective averages');
+  proc.process(makeNoise(n, 0.1, 999), 0.01, 0.5);
+  assert.equal(proc.avgCount, 4);
+  assert.ok(proc.linearDone, 'done at the target');
+});
+
+test('weighted linear average equals the plain mean when every weight is equal', () => {
+  const fs = 10000;
+  const n = 512;
+  const a = new SpectrumProcessor({ fftSize: n, windowName: 'hann', sampleRate: fs });
+  const b = new SpectrumProcessor({ fftSize: n, windowName: 'hann', sampleRate: fs });
+  a.setAveraging('linear', { linearTarget: 100 });
+  b.setAveraging('linear', { linearTarget: 100 });
+  for (let seg = 0; seg < 6; seg++) {
+    const x = makeNoise(n, 0.1, seg * 17 + 3);
+    a.process(x, 0.01, 1);
+    b.process(x, 0.01, 0.25);
+  }
+  for (let k = 0; k < a.nBins; k++) assert.ok(Math.abs(a.avgPower[k] - b.avgPower[k]) < 1e-9 * (1 + a.avgPower[k]));
+});

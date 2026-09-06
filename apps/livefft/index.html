@@ -35,7 +35,6 @@
       <div id="topbar-right">
         <span class="lamp" id="lamp-clip">CLIP</span>
         <button class="btn ghost icon" id="btn-help" aria-label="Explain the current settings" title="What do these settings mean?">?</button>
-        <button class="btn ghost icon" id="btn-full" aria-label="Full screen" title="Full screen — hide all controls">⤢</button>
         <button class="btn ghost icon" id="btn-theme" aria-label="Toggle light/dark theme" title="Light / dark theme">☀</button>
         <button class="btn primary" id="btn-run" title="Space bar toggles run/pause">▶ Start</button>
         <button class="btn ghost icon" id="btn-panel" aria-label="Settings" title="Settings">☰</button>
@@ -64,7 +63,11 @@
         <span class="readout" id="ro-avg-wrap" hidden>avg <b id="ro-avg">0</b></span>
         <span class="readout" id="ro-peak-wrap">peak <b id="ro-peak">—</b></span>
       </div>
-      <button id="btn-settings" aria-label="Settings">⚙ Settings</button>
+      <button class="btn ghost icon" id="btn-full" aria-label="Full screen" title="Full screen — hide all controls">⤢</button>
+      <div id="peak-tools" data-views="spectrum">
+        <button class="tool" id="btn-peakhold" data-tip="Keeps the maximum of the displayed trace since the last reset — shown as the amber trace. With averaging on it holds the averaged level; switch averaging off to catch short transients." title="Peak hold">Hold</button>
+        <button class="tool" id="btn-peakreset" title="Reset the held peaks" hidden>Reset</button>
+      </div>
     </main>
 
     <div id="scrim" hidden></div>
@@ -75,7 +78,6 @@
         <div id="panel-title">
           <h4>Settings</h4>
           <button class="btn ghost icon" id="btn-help2" aria-label="Explain the current settings">?</button>
-          <button class="btn ghost icon" id="btn-full2" aria-label="Full screen">⤢</button>
           <button class="btn ghost icon" id="btn-theme2" aria-label="Toggle light/dark theme">☀</button>
           <button class="btn ghost icon" id="btn-panel-close" aria-label="Close settings">✕</button>
         </div>
@@ -86,7 +88,10 @@
         <h3 class="group-title">Source</h3>
         <div class="row">
           <label for="sel-source" data-tip="A microphone (audio processing disabled for measurement), or a built-in demo signal — demos need no mic permission.">Input</label>
-          <select id="sel-source"></select>
+          <span class="ctl">
+            <select id="sel-source"></select>
+            <span class="readout aside" id="ro-fs2" title="Sample rate">—</span>
+          </span>
         </div>
         <div class="row" id="row-monitor" hidden>
           <label for="rng-monitor" data-tip="Play the demo signal through the speakers.">Listen</label>
@@ -98,11 +103,14 @@
         <h3 class="group-title">Analysis</h3>
         <div class="row" id="row-fft">
           <label for="sel-fft" data-tip="Samples per FFT. Longer = finer frequency resolution (Δf = fs / N) but slower response to change. Not used by the wavelet spectrogram.">FFT size</label>
-          <select id="sel-fft">
-            <option>512</option><option>1024</option><option>2048</option>
-            <option>4096</option><option>8192</option><option>16384</option>
-            <option>32768</option>
-          </select>
+          <span class="ctl">
+            <select id="sel-fft">
+              <option>512</option><option>1024</option><option>2048</option>
+              <option>4096</option><option>8192</option><option>16384</option>
+              <option>32768</option>
+            </select>
+            <span class="readout aside" id="ro-res2" title="Frequency resolution Δf">—</span>
+          </span>
         </div>
         <div class="row" id="row-window">
           <label for="sel-window" data-tip="Taper applied before the FFT to control spectral leakage. Hann is the standard choice; flat-top gives the most accurate peak amplitudes; rectangular shows leakage at its worst.">Window</label>
@@ -128,7 +136,7 @@
       <div class="group" data-views="spectrum" data-tab="Analysis">
         <h3 class="group-title">Averaging</h3>
         <div class="row">
-          <label data-tip="Off: live FFT — each frame is one instantaneous spectrum. Exp: running average with a time constant. Linear: average N spectra then freeze — a Welch PSD measurement. Frames advance every half FFT length of new samples (50% overlap), whatever the display rate.">Mode</label>
+          <label data-tip="Off: live FFT — each frame is one instantaneous spectrum. Exp: running average with a time constant. Linear: average N spectra then freeze — a Welch PSD measurement. The display updates every 43 ms; frames closer than half an FFT count fractionally, so N averages are N independent ones.">Mode</label>
           <nav class="seg">
             <input type="radio" name="avgmode" value="off" id="avg-off">
             <label for="avg-off">Off</label>
@@ -144,19 +152,12 @@
           <span class="readout" id="ro-tau" style="min-width: 3.6rem; text-align: right;">0.5 s</span>
         </div>
         <div class="row" id="row-linN" hidden>
-          <label for="sel-linN" data-tip="Number of spectra averaged before the display freezes. Restart begins a fresh measurement.">Averages</label>
+          <label for="sel-linN" data-tip="Number of independent spectra averaged before the display freezes. Restart begins a fresh measurement.">Averages</label>
           <select id="sel-linN">
             <option>4</option><option>8</option><option>16</option>
             <option>32</option><option>64</option><option>128</option>
           </select>
           <button class="btn small" id="btn-avg-restart">Restart</button>
-        </div>
-        <div class="row">
-          <label for="sw-peakhold" data-tip="Keeps the maximum of the displayed trace since the last reset — shown as the second (amber) trace. With averaging on it holds the averaged level; switch averaging off to catch short transients.">Peak hold</label>
-          <span style="display:flex; align-items:center; gap:0.5rem;">
-            <span class="switch"><input type="checkbox" id="sw-peakhold"><span class="track"></span></span>
-            <button class="btn small" id="btn-peakreset">Reset</button>
-          </span>
         </div>
       </div>
 
@@ -247,14 +248,14 @@
              further down never move when toggling -->
         <div id="cwt-rows" hidden>
           <div class="row">
-            <label for="num-cwtfmin" data-tip="Frequency range the wavelet analysis covers. Lower f min needs longer wavelets, so the display lags a little more; phones lag noticeably below about 20 Hz.">f min / max</label>
+            <label for="num-cwtfmin" data-tip="Frequency range the wavelet analysis covers. Lower f min needs longer wavelets, so the display trails real time a little more (four wavelet widths at f min).">f min / max</label>
             <span style="display:flex; gap:0.4rem;">
               <input type="number" id="num-cwtfmin" min="5" step="5" style="width:4.4rem;">
               <input type="number" id="num-cwtfmax" min="100" step="100" style="width:4.4rem;">
             </span>
           </div>
           <div class="row">
-            <label for="sel-cwtbpo" data-tip="How densely the frequency axis is sampled with wavelets. The true resolution is set by Wavelet Q — beyond ~32/oct you mostly pay CPU for a smoother picture. High values can slow this view on phones (the display then trails further behind real time).">Bins / octave</label>
+            <label for="sel-cwtbpo" data-tip="How densely the frequency axis is sampled with wavelets. The true resolution is set by Wavelet Q — beyond ~32/oct you mostly pay CPU for a smoother picture. A slow device keeps up by computing every second or third column and repeating it (the note in the plot says so).">Bins / octave</label>
             <select id="sel-cwtbpo">
               <option>8</option><option>12</option><option>16</option><option>24</option>
               <option>32</option><option>48</option><option>64</option>
@@ -329,8 +330,6 @@
       </div>
     </aside>
   </div>
-
-  <button id="btn-exit-full" aria-label="Exit full screen" hidden>✕</button>
 
   <div id="help-overlay" hidden>
     <div id="help-card" class="panel" role="dialog" aria-modal="true" aria-label="Settings help">

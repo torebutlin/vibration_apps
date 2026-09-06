@@ -1,141 +1,225 @@
-// Continuous wavelet transform (Morlet) for live multi-resolution
-// time-frequency analysis.
+// Streaming continuous wavelet transform (Morlet) for a live scaleogram.
 //
-// Method: one real FFT of a long full-rate block, then for each scale a
-// Gaussian bandpass (the analytic Morlet wavelet in the frequency domain)
-// is applied and inverted with a small complex IFFT. Decimation to the
-// analysis rate is free: truncating the spectrum to the first M/D bins IS
-// brick-wall decimation by D. Filters use only positive frequencies
-// (doubled), so each IFFT yields the analytic signal at that scale and
-// |y| reads directly as the amplitude of a tone at the scale's centre
-// frequency.
+// The signal is anti-alias filtered and decimated to a rate a little above
+// 2.5 x fMax, then each output column is the direct correlation of the
+// decimated stream with every scale's complex Morlet wavelet, evaluated at
+// that column's instant only. Cost is therefore proportional to the number
+// of columns (not to the block length), the latency is fixed at four sigma
+// of the widest wavelet, and columns arrive on the audio clock one hop at
+// a time — nothing to batch, nothing to catch up on.
 //
-// Circular convolution wraps at the block edges, so output columns are
-// only valid at least `latency` samples away from the newest edge, where
-// latency = 4 sigma of the widest (lowest-frequency) wavelet. The live
-// display therefore trails real time by that fixed amount (~0.2 s at
-// 20 Hz, omega0 = 6).
+// Amplitude: a tone of amplitude A at a scale's centre frequency reads A
+// on that row (the wavelet is normalised by half the envelope sum).
 
-import { rfft, fftInPlace } from './fft.js';
+/** Blackman-windowed sinc low-pass, normalised to unit DC gain. */
+function lowpass(taps, fcNorm) {
+  const h = new Float32Array(taps);
+  const M = (taps - 1) / 2;
+  let sum = 0;
+  for (let k = 0; k < taps; k++) {
+    const n = k - M;
+    const sinc = n === 0 ? 2 * fcNorm : Math.sin(2 * Math.PI * fcNorm * n) / (Math.PI * n);
+    const w = 0.42 - 0.5 * Math.cos((2 * Math.PI * k) / (taps - 1)) + 0.08 * Math.cos((4 * Math.PI * k) / (taps - 1));
+    h[k] = sinc * w;
+    sum += h[k];
+  }
+  for (let k = 0; k < taps; k++) h[k] /= sum;
+  return h;
+}
 
-export class MorletCWT {
+export class StreamingCWT {
   /**
    * @param {object} opts
-   * @param {number} opts.fullSize full-rate block length (power of 2)
    * @param {number} opts.sampleRate full sample rate
    * @param {number} opts.fMin lowest centre frequency (Hz)
    * @param {number} opts.fMax highest centre frequency (Hz)
    * @param {number} opts.binsPerOctave scales per octave
    * @param {number} opts.omega0 Morlet parameter (~Q); 6 is classic
+   * @param {number} opts.hopSamples wanted full-rate samples per column
+   *   (rounded to a whole number of decimated samples; see .hop)
    */
   constructor({
-    fullSize = 32768,
     sampleRate = 48000,
-    fMin = 20,
-    fMax = 5000,
-    binsPerOctave = 12,
-    omega0 = 6,
+    fMin = 30,
+    fMax = 4000,
+    binsPerOctave = 16,
+    omega0 = 12,
+    hopSamples = 480,
   } = {}) {
-    if ((fullSize & (fullSize - 1)) !== 0) throw new Error('fullSize must be a power of 2');
-    this.fullSize = fullSize;
     this.sampleRate = sampleRate;
     this.omega0 = omega0;
 
-    // Decimation factor: keep decimated Nyquist comfortably above fMax
+    // Decimation: keep the decimated Nyquist at least 1.25 x fMax
     let D = 1;
-    while (sampleRate / (2 * D * 2) >= fMax * 1.25 && fullSize / (D * 2) >= 1024) D *= 2;
+    while (sampleRate / (2 * D * 2) >= fMax * 1.25) D *= 2;
     this.decimation = D;
-    this.decSize = fullSize / D;         // complex IFFT size
-    this.decRate = sampleRate / D;       // decimated sample rate
+    this.decRate = sampleRate / D;
+    this.hopDec = Math.max(1, Math.round(hopSamples / D));
+    this.hop = this.hopDec * D;
 
     // Scale centre frequencies, geometric from fMin to fMax
     const nOct = Math.log2(fMax / fMin);
     const nScales = Math.max(2, Math.round(nOct * binsPerOctave) + 1);
     this.freqs = new Float64Array(nScales);
-    for (let j = 0; j < nScales; j++) {
-      this.freqs[j] = fMin * 2 ** ((j * nOct) / (nScales - 1));
-    }
+    for (let j = 0; j < nScales; j++) this.freqs[j] = fMin * 2 ** ((j * nOct) / (nScales - 1));
     this.nScales = nScales;
 
-    // Latency: 4 sigma of the lowest-frequency wavelet, in decimated samples.
-    // Morlet time sigma at frequency f is s = omega0 / (2 pi f).
-    const sigmaMax = omega0 / (2 * Math.PI * fMin);
-    this.latencyDec = Math.ceil(4 * sigmaMax * this.decRate);
-    if (this.latencyDec > this.decSize / 2) {
-      throw new Error(
-        `Block too short for fMin=${fMin} Hz: latency ${this.latencyDec} > ${this.decSize / 2}`
-      );
-    }
-
-    // Precompute filters: H_j[k] = 2 * exp(-(s_j*w_k - omega0)^2 / 2)
-    // on decimated bins k = 0..decSize/2 (positive frequencies only).
-    const nBins = this.decSize / 2 + 1;
-    this.filters = [];
+    // Wavelets on the decimated grid: Gaussian envelope of sigma =
+    // omega0 / (2 pi f) seconds, truncated at 4 sigma each side.
+    this.half = new Int32Array(nScales);
+    this.cosT = new Array(nScales);
+    this.sinT = new Array(nScales);
+    this.norm = new Float64Array(nScales);
+    let Lmax = 0;
     for (let j = 0; j < nScales; j++) {
-      const s = omega0 / (2 * Math.PI * this.freqs[j]);
-      const H = new Float64Array(nBins);
-      for (let k = 0; k < nBins; k++) {
-        const w = (2 * Math.PI * k * this.decRate) / this.decSize; // rad/s
-        const arg = s * w - omega0;
-        const g = Math.exp(-0.5 * arg * arg);
-        H[k] = k === 0 || k === nBins - 1 ? g : 2 * g;
+      const f = this.freqs[j];
+      const sigma = (omega0 / (2 * Math.PI * f)) * this.decRate;
+      const L = Math.ceil(4 * sigma);
+      const c = new Float32Array(2 * L + 1);
+      const s = new Float32Array(2 * L + 1);
+      const w = (2 * Math.PI * f) / this.decRate;
+      let sumG = 0;
+      for (let n = -L; n <= L; n++) {
+        const g = Math.exp(-(n * n) / (2 * sigma * sigma));
+        c[n + L] = g * Math.cos(w * n);
+        s[n + L] = g * Math.sin(w * n);
+        sumG += g;
       }
-      this.filters.push(H);
+      this.half[j] = L;
+      this.cosT[j] = c;
+      this.sinT[j] = s;
+      this.norm[j] = 2 / sumG;
+      if (L > Lmax) Lmax = L;
     }
+    this.latencyDec = Lmax;
 
-    this.re = new Float64Array(this.decSize);
-    this.im = new Float64Array(this.decSize);
+    // Anti-alias decimator: passband to fMax, stopband from decRate - fMax
+    // (what would fold back into the band), Blackman sinc. Only evaluated
+    // at decimated instants, so even thousands of taps are cheap.
+    if (D > 1) {
+      const tw = this.decRate - 2 * fMax;
+      const taps = Math.min(4095, Math.ceil((5.5 * sampleRate) / tw)) | 1;
+      this.h = lowpass(taps, this.decRate / 2 / sampleRate);
+      this.taps = taps;
+      this.carry = new Float32Array(taps - 1);
+      this.work = new Float32Array(taps - 1 + 8192);
+    } else {
+      this.taps = 1;
+      this.carry = new Float32Array(0);
+      this.work = null;
+    }
+    this.groupDelay = (this.taps - 1) / 2; // full-rate samples
+    this.latencySamples = Lmax * D + this.groupDelay;
+    this.latencySeconds = this.latencySamples / sampleRate;
+
+    // Decimated ring: both halves of the widest wavelet plus a backlog
+    let cap = 1024;
+    while (cap < 2 * Lmax + 32 * this.hopDec + 1024) cap <<= 1;
+    this.ring = new Float32Array(cap);
+    this.mask = cap - 1;
+    this.decCount = 0;    // decimated samples produced so far
+    this.pushed = 0;      // full-rate samples pushed so far
+    this.nextOut = 0;     // next decimated output index (i = m * D)
+    this.nextColDec = Lmax; // decimated index of the next column instant
   }
 
-  /** Seconds by which output trails the newest sample. */
-  get latencySeconds() {
-    return this.latencyDec / this.decRate;
+  /** Append full-rate samples to the stream. */
+  push(chunk) {
+    const D = this.decimation;
+    const ring = this.ring;
+    const mask = this.mask;
+    if (D === 1) {
+      for (let i = 0; i < chunk.length; i++) ring[(this.decCount + i) & mask] = chunk[i];
+      this.decCount += chunk.length;
+      this.pushed += chunk.length;
+      return;
+    }
+    const T = this.taps;
+    const C = T - 1;
+    if (this.work.length < C + chunk.length) this.work = new Float32Array(C + chunk.length);
+    const work = this.work;
+    work.set(this.carry, 0);
+    work.set(chunk, C);
+    const base = this.pushed - C; // global full-rate index of work[0]
+    const end = this.pushed + chunk.length;
+    const h = this.h;
+    let m = this.nextOut;
+    while (m * D <= end - 1) {
+      const off = m * D - base;
+      let acc = 0;
+      for (let k = 0; k < T; k++) acc += h[k] * work[off - k];
+      ring[this.decCount & mask] = acc;
+      this.decCount++;
+      m++;
+    }
+    this.nextOut = m;
+    const len = end - base;
+    this.carry.set(work.subarray(len - C, len));
+    this.pushed = end;
+  }
+
+  /** Columns that can be computed now (their whole window has arrived). */
+  get available() {
+    const lastT = this.decCount - 1 - this.latencyDec;
+    if (lastT < this.nextColDec) return 0;
+    return Math.floor((lastT - this.nextColDec) / this.hopDec) + 1;
   }
 
   /**
-   * Compute the newest `nCols` scaleogram columns.
-   * Column c (0-based, oldest first) corresponds to decimated time index
-   * decSize - 1 - latencyDec - (nCols - 1 - c) * colStride.
-   *
-   * @param {Float32Array} samples newest fullSize full-rate samples
-   * @param {number} nCols number of output columns
-   * @param {number} colStride decimated samples per column
-   * @param {Float32Array} [out] length nScales * nCols, row-major by scale
-   * @returns {Float32Array} amplitudes |y| (linear, full-scale units)
+   * Compute the next column into `out` (length nScales, amplitudes).
+   * @returns {number|null} the column's instant as a full-rate stream
+   *   position (samples since the first push), or null if none is ready.
+   *   Instants advance by exactly `hop` unless the ring overflowed, in
+   *   which case the next instant jumps forward by whole hops.
    */
-  analyze(samples, nCols, colStride, out = null) {
-    const M = this.fullSize;
-    if (samples.length < M) throw new Error('need fullSize samples');
-    const block = samples.length === M ? samples : samples.subarray(samples.length - M);
-
-    const spec = rfft(block); // one-sided, M/2+1 bins
-    const nBins = this.decSize / 2 + 1;
-    const result = out ?? new Float32Array(this.nScales * nCols);
-
-    const newest = this.decSize - 1 - this.latencyDec;
-    const oldestNeeded = newest - (nCols - 1) * colStride;
-    if (oldestNeeded < 0) throw new Error('too many columns for block length');
-
-    for (let j = 0; j < this.nScales; j++) {
-      const H = this.filters[j];
-      const re = this.re;
-      const im = this.im;
-      re.fill(0);
-      im.fill(0);
-      for (let k = 0; k < nBins; k++) {
-        re[k] = spec.re[k] * H[k];
-        im[k] = spec.im[k] * H[k];
-      }
-      // Inverse FFT is unscaled. A tone of amplitude A at a scale centre has
-      // |X_full| = A/2 * fullSize in its bin; the doubled filter and a 1/fullSize
-      // normalisation make |y| read A directly.
-      fftInPlace(re, im, true);
-      const norm = 1 / this.fullSize;
-      for (let c = 0; c < nCols; c++) {
-        const t = oldestNeeded + c * colStride;
-        result[j * nCols + c] = Math.hypot(re[t], im[t]) * norm;
-      }
+  nextColumn(out) {
+    if (this.available === 0) return null;
+    let t = this.nextColDec;
+    const oldest = this.decCount - this.ring.length;
+    if (t - this.latencyDec < oldest) {
+      // fell behind by more than the ring holds: jump to the oldest computable column
+      const jump = Math.ceil((oldest + this.latencyDec - t) / this.hopDec);
+      t += jump * this.hopDec;
     }
-    return result;
+    this.#column(t, out);
+    this.nextColDec = t + this.hopDec;
+    return t * this.decimation - this.groupDelay;
+  }
+
+  /** Advance past the next column without computing it (slow devices). */
+  skipColumn() {
+    if (this.available === 0) return null;
+    const t = this.nextColDec;
+    this.nextColDec = t + this.hopDec;
+    return t * this.decimation - this.groupDelay;
+  }
+
+  #column(t, out) {
+    const ring = this.ring;
+    const mask = this.mask;
+    const cap = ring.length;
+    for (let j = 0; j < this.nScales; j++) {
+      const L = this.half[j];
+      const c = this.cosT[j];
+      const s = this.sinT[j];
+      const n = 2 * L + 1;
+      const start = (t - L) & mask;
+      let re = 0;
+      let im = 0;
+      if (start + n <= cap) {
+        for (let i = 0; i < n; i++) {
+          const x = ring[start + i];
+          re += x * c[i];
+          im += x * s[i];
+        }
+      } else {
+        for (let i = 0; i < n; i++) {
+          const x = ring[(start + i) & mask];
+          re += x * c[i];
+          im += x * s[i];
+        }
+      }
+      out[j] = Math.hypot(re, im) * this.norm[j];
+    }
   }
 }

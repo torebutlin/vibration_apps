@@ -85,7 +85,7 @@ export class MultiResSpectrum {
   get linearProgress() {
     let count = Infinity;
     for (const s of this.stages) count = Math.min(count, s.avgCount);
-    return { count, target: this.linearTarget, done: count >= this.linearTarget };
+    return { count, target: this.linearTarget, done: count >= this.linearTarget - 1e-9 };
   }
 
   /** Longest window length needed from the ring buffer. */
@@ -96,12 +96,16 @@ export class MultiResSpectrum {
   /**
    * @param {Float32Array} samples newest samples, length >= maxSize
    * @param {number} dt seconds since last call
+   * @param {number} weight independent-frame weight of this call for the
+   *   base stage (1 = hop of half the base window). Stage k runs every 2^k
+   *   calls on a 4^k longer window, so its weight is weight / 2^k.
    */
-  process(samples, dt) {
-    for (const s of this.stages) {
+  process(samples, dt, weight = 1) {
+    for (let k = 0; k < this.stages.length; k++) {
+      const s = this.stages[k];
       s.frame++;
       if (s.frame % s.cadence !== 0 && s.avgCount > 0) continue;
-      const linearDone = this.avgMode === 'linear' && s.avgCount >= this.linearTarget;
+      const linearDone = this.avgMode === 'linear' && s.avgCount >= this.linearTarget - 1e-9;
       // instantaneous spectrum always (drives the live ghost trace);
       // only the average freezes when a linear measurement completes
       const n = s.size;
@@ -117,8 +121,9 @@ export class MultiResSpectrum {
             break;
           case 'linear': {
             const c = s.avgCount;
-            for (let k = 0; k < nBins; k++) avgPower[k] = (avgPower[k] * c + power[k]) / (c + 1);
-            s.avgCount = c + 1;
+            const w = weight / 2 ** k;
+            for (let b = 0; b < nBins; b++) avgPower[b] = (avgPower[b] * c + power[b] * w) / (c + w);
+            s.avgCount = c + w;
             break;
           }
           default: {

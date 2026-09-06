@@ -70,8 +70,12 @@ export class SpectrumProcessor {
    * Process one frame of the newest fftSize samples.
    * @param {Float32Array} samples length >= fftSize; the last fftSize are used
    * @param {number} dt seconds since previous frame (for exponential averaging)
+   * @param {number} weight how much of an independent frame this is:
+   *   1 for frames hopping by half the FFT (50% overlap), hop/(N/2) when
+   *   frames come more often than that. Linear averaging counts weights,
+   *   so "N averages" always means N independent estimates.
    */
-  process(samples, dt) {
+  process(samples, dt, weight = 1) {
     const n = this.fftSize;
     const offset = samples.length - n;
     const w = this.window;
@@ -97,9 +101,10 @@ export class SpectrumProcessor {
       case 'linear': {
         if (!this.linearDone) {
           const c = this.avgCount;
-          for (let k = 0; k < nb; k++) avg[k] = (avg[k] * c + p[k]) / (c + 1);
-          this.avgCount = c + 1;
-          if (this.avgCount >= this.linearTarget) this.linearDone = true;
+          const w = weight;
+          for (let k = 0; k < nb; k++) avg[k] = (avg[k] * c + p[k] * w) / (c + w);
+          this.avgCount = c + w;
+          if (this.avgCount >= this.linearTarget - 1e-9) this.linearDone = true;
         }
         break;
       }

@@ -3,8 +3,11 @@
 // Two engines:
 //   STFT — windowed FFT columns on a fixed column clock (span/COLS seconds
 //          per column), sampled onto display rows per the freq axis.
-//   CWT  — Morlet scaleogram columns from a Web Worker (multi-resolution;
-//          display trails real time by the wavelet latency).
+//   CWT  — streaming Morlet scaleogram from a Web Worker: the view pushes
+//          the new samples every frame, the worker returns one column per
+//          hop on the audio clock. The display trails real time by the
+//          wavelet latency plus a small fixed margin; a slow device gets
+//          coarser time steps (repeated columns), never a stall.
 //
 // A raw dB ring (COLS x ROWS) is kept alongside the pixel ring so colormap
 // or range changes repaint the whole history, not just new columns.
@@ -19,14 +22,12 @@ import { effectiveFreqScale } from '../state.js';
 const COLS = 1024;
 const ROWS = 512;
 
-// In CWT mode the display is pinned a margin behind real time (on top of
-// the wavelet latency) so worker batches always land before their columns
-// reach the right edge — the edge stays filled instead of showing a
-// hovering "not yet computed" gap. The margin adapts to the observed
-// worker batch interval, so slower devices (phones, high bins/octave)
-// simply sit a little further behind real time instead of stuttering.
-const CWT_MARGIN_MIN = 0.45; // seconds
-const CWT_MARGIN_MAX = 4.0;
+// CWT display margin behind the wavelet latency (seconds), so a column is
+// always computed before its instant reaches the right edge.
+const CWT_MARGIN = 0.12;
+// Audio already captured that a fresh worker is fed first, so the display
+// fills from the left instead of starting empty.
+const CWT_PREHISTORY = 1.0;
 
 export class SpectrogramView {
   constructor(state) {
@@ -44,14 +45,10 @@ export class SpectrogramView {
 
     this.worker = null;
     this.workerReady = false;
-    this.workerBusy = false;
     this.cwtFreqs = null;
-    this.cwtLatency = 0;
-    this.cwtDecRate = 0;
-    this.lastDecSent = 0;
-    this.displayMargin = CWT_MARGIN_MIN; // slewed toward batchGapMax
-    this.batchGapMax = CWT_MARGIN_MIN;
-    this.lastResultAt = 0;
+    this.cwtLatencySec = 0;
+    this.lastPushed = null;   // engine sample count up to which audio has been sent
+    this.cwtSkip = 1;         // worker's current time-step coarsening
 
     this.sinceCol = 0;      // samples since last emitted column (stft)
     this.lastTotal = 0;
@@ -146,15 +143,13 @@ export class SpectrogramView {
   #rebuild() {
     const s = this.state;
     const fs = this.sampleRate;
-    // Total display delay (CWT): wavelet latency (4 sigma at fMin) plus a
-    // batch margin that adapts to the worker's observed cadence (slow
-    // devices sit further behind real time instead of stuttering). The
-    // column ring is sized for the worst-case margin so the plot stays
-    // filled edge-to-edge whatever the margin adapts to.
-    this.cwtLatencySec = (4 * s.get('cwtOmega0')) / (2 * Math.PI * s.get('cwtFMin'));
-    this.displayDelaySec = this.isCwt ? this.cwtLatencySec + CWT_MARGIN_MIN : 0;
+    // CWT: the ring must cover span + latency + margin. The latency here is
+    // an estimate for sizing; the worker reports the exact latency and the
+    // exact column period once configured.
+    const latencyGuess = (4 * s.get('cwtOmega0')) / (2 * Math.PI * s.get('cwtFMin'));
+    this.displayDelaySec = this.isCwt ? latencyGuess + CWT_MARGIN : 0;
     this.colPeriodSamples =
-      ((s.get('sgSpan') + (this.isCwt ? this.cwtLatencySec + CWT_MARGIN_MAX : 0)) * fs) / COLS;
+      ((s.get('sgSpan') + (this.isCwt ? latencyGuess + CWT_MARGIN + 0.5 : 0)) * fs) / COLS;
     this.sinceCol = 0;
     this.lastTotal = 0;
     this.newestColTotal = 0;
@@ -180,7 +175,6 @@ export class SpectrogramView {
         this.worker.terminate();
         this.worker = null;
         this.workerReady = false;
-        this.workerBusy = false;
       }
     } else {
       this.#setupWorker(fr);
@@ -191,52 +185,34 @@ export class SpectrogramView {
   #setupWorker(fr) {
     if (this.worker) this.worker.terminate();
     this.workerReady = false;
-    this.workerBusy = false;
+    this.lastPushed = null;
+    this.cwtSkip = 1;
     this.worker = new Worker(new URL('../workers/cwt-worker.js', import.meta.url), { type: 'module' });
-    this.displayMargin = CWT_MARGIN_MIN;
-    this.batchGapMax = CWT_MARGIN_MIN;
-    this.lastResultAt = 0;
     const s = this.state;
-    // block long enough for the 4-sigma latency of the lowest wavelet PLUS
-    // ~1 s of usable output columns per analysis call
-    const omega0 = s.get('cwtOmega0');
-    const sigmaMax = omega0 / (2 * Math.PI * fr.min);
-    let fullSize = 16384;
-    while (fullSize / this.sampleRate < 8 * sigmaMax + 1.0 && fullSize < 1 << 20) fullSize <<= 1;
-    this.cwtFullSize = fullSize;
     this.worker.postMessage({
       type: 'config',
-      fullSize,
       sampleRate: this.sampleRate,
       fMin: fr.min,
       fMax: fr.max,
       binsPerOctave: s.get('cwtBinsPerOctave'),
-      omega0,
+      omega0: s.get('cwtOmega0'),
+      hopSamples: Math.round(this.colPeriodSamples),
     });
     this.worker.onmessage = (e) => {
       const msg = e.data;
       if (msg.type === 'error') {
-        this.workerBusy = false;
         console.error('CWT worker:', msg.message);
       } else if (msg.type === 'ready') {
         this.workerReady = true;
         this.cwtFreqs = msg.freqs;
-        this.cwtLatency = msg.latencySeconds;
-        this.cwtDecRate = msg.decRate;
-        this.cwtMaxCols = msg.maxCols; // decimated samples usable per call
-        this.lastDecSent = 0;
+        this.cwtLatencySec = msg.latencySeconds;
+        this.colPeriodSamples = msg.hop; // the worker's exact column period
+        this.displayDelaySec = msg.latencySeconds + CWT_MARGIN;
         this.#buildCwtRowMap();
-      } else if (msg.type === 'result') {
-        this.workerBusy = false;
-        // Ratchet: the margin only ever grows within a session, so once it
-        // has adapted the display time evolves strictly linearly (no
-        // breathing). Settings changes rebuild the worker and reset it.
-        const now = performance.now() / 1000;
-        if (this.lastResultAt) {
-          this.batchGapMax = Math.max(now - this.lastResultAt, this.batchGapMax);
-        }
-        this.lastResultAt = now;
+      } else if (msg.type === 'columns') {
+        this.cwtSkip = msg.skip;
         this.#writeCwtColumns(msg.data, msg.nCols);
+        this.newestColTotal = msg.endTotal;
       }
     };
   }
@@ -297,14 +273,8 @@ export class SpectrogramView {
     }
   }
 
-  /** Wavelet latency in decimated samples. */
-  latencyDecApprox() {
-    return Math.round(this.cwtLatency * this.cwtDecRate);
-  }
-
   #writeCwtColumns(data, nCols) {
     // data: Float32Array nScales x nCols (row-major by scale), amplitudes
-    if (this.pendingEndTotal) this.newestColTotal = this.pendingEndTotal;
     for (let c = 0; c < nCols; c++) {
       for (let r = 0; r < ROWS; r++) {
         let amp = 0;
@@ -359,28 +329,26 @@ export class SpectrogramView {
         this.dbCol[r] = 20 * Math.log10(Math.max(amp, 1e-12));
       }
       for (let e = 0; e < toEmit; e++) this.#writeColumn(this.dbCol);
-    } else if (this.workerReady && !this.workerBusy) {
-      const decPerCol = Math.max(1, Math.round((this.colPeriodSamples * this.cwtDecRate) / this.sampleRate));
-      const nowDec = Math.floor((total * this.cwtDecRate) / this.sampleRate);
-      if (this.lastDecSent === 0) this.lastDecSent = nowDec;
-      const elapsed = nowDec - this.lastDecSent;
-      const maxCols = Math.max(1, Math.floor(this.cwtMaxCols / decPerCol));
-      const nCols = Math.min(Math.floor(elapsed / decPerCol), maxCols, 256);
-      if (nCols < 1) return;
-      if (engine.totalSamples < this.cwtFullSize) return;
-      const buf = new Float32Array(this.cwtFullSize);
-      if (!engine.read(this.cwtFullSize, buf)) return;
-      // advance by the full backlog: anything beyond nCols is dropped
-      // (display resumes at real time after a stall)
-      this.lastDecSent = nowDec - (elapsed % decPerCol);
-      // full-rate time of the last requested column (incl. wavelet latency)
-      this.pendingEndTotal =
-        ((this.lastDecSent - this.latencyDecApprox()) * this.sampleRate) / this.cwtDecRate;
-      this.workerBusy = true;
+    } else if (this.workerReady) {
+      // stream every new sample to the worker; it answers with columns
+      if (this.lastPushed === null) {
+        this.lastPushed = Math.max(0, total - Math.round(CWT_PREHISTORY * this.sampleRate));
+      }
+      const pending = total - this.lastPushed;
+      if (pending <= 0) return;
+      if (pending > 6 * this.sampleRate) {
+        // a long stall (tab in the background): restart the stream rather
+        // than push a gap the worker cannot know about
+        this.#setupWorker(this.#freqRange());
+        return;
+      }
+      const buf = new Float32Array(pending);
+      if (!engine.read(pending, buf)) return;
       this.worker.postMessage(
-        { type: 'analyze', samples: buf, nCols, colStride: decPerCol },
+        { type: 'push', samples: buf, startTotal: this.lastPushed, sentAt: Date.now() },
         [buf.buffer]
       );
+      this.lastPushed = total;
     }
   }
 
@@ -402,12 +370,6 @@ export class SpectrogramView {
     // overhang the right edge and glide into view — no hovering gap, and
     // the left edge stays covered too.
     const fsr = this.sampleRate;
-    if (this.isCwt) {
-      // slew the delay toward what the worker's batch cadence needs
-      const target =
-        this.cwtLatencySec + Math.min(Math.max(1.3 * this.batchGapMax, CWT_MARGIN_MIN), CWT_MARGIN_MAX);
-      this.displayDelaySec += 0.04 * (target - this.displayDelaySec);
-    }
     const dSamples = this.displayDelaySec * fsr;
     const pxPerSample = r.w / (s.get('sgSpan') * fsr);
     let xEnd = r.x + r.w; // newest column's right edge, in px
@@ -431,8 +393,8 @@ export class SpectrogramView {
     if (wNew > 0) {
       ctx.drawImage(this.img, 0, 0, wNew, ROWS, xStart + (wOld / COLS) * ringW, r.y, (wNew / COLS) * ringW, r.h);
     }
-    // uncovered strips (right: not yet computed; left: possible during
-    // margin adaptation): paint as silence, not page bg
+    // uncovered strips (right: not yet computed; left: ring shorter than the
+    // span after a rebuild): paint as silence, not page bg
     const lut = this.lut;
     ctx.fillStyle = `rgb(${lut[0]}, ${lut[1]}, ${lut[2]})`;
     if (xEnd < r.x + r.w) ctx.fillRect(xEnd, r.y, r.x + r.w - xEnd, r.h);
@@ -440,7 +402,7 @@ export class SpectrogramView {
     ctx.restore();
 
     // frame + labels, no grid over the image
-    this.axes.draw(ctx, {
+    const axisOpts = {
       xLabel: 'time · s',
       yLabel: 'frequency · Hz',
       xFmt: (v) => (L.compact && Math.abs(v) < 1e-6 ? '' : Math.abs(v % 1) < 1e-6 ? v.toFixed(0) : v.toFixed(1)),
@@ -450,19 +412,32 @@ export class SpectrogramView {
       xTitle: L.xTitle,
       yTitle: L.yTitle,
       theme: { grid: 'transparent', gridStrong: 'transparent' },
-    });
+    };
+    this.axes.draw(ctx, axisOpts);
+    if (L.yInside) this.axes.drawInsideLabels(ctx, axisOpts);
 
-    // colorbar hint + latency note
+    // colour-scale + latency note, bottom-right inside the plot on a tag so
+    // it reads over the image and stays clear of the corner label and HUD
     const th = plotTheme();
-    ctx.font = '500 10px "JetBrains Mono", monospace';
-    ctx.fillStyle = th.title;
-    ctx.textAlign = 'right';
-    ctx.textBaseline = 'top';
-    const range = `${s.get('sgFloorDb')}…${s.get('sgCeilDb')} dBFS amplitude`;
-    const note = this.isCwt && this.displayDelaySec
-      ? `CWT · display −${this.displayDelaySec.toFixed(2)} s · ${range}`
-      : range;
-    ctx.fillText(note, r.x + r.w - 4, r.y + 4);
+    const range = `${s.get('sgFloorDb')}…${s.get('sgCeilDb')} dBFS`;
+    const delay = this.isCwt && this.displayDelaySec ? `−${this.displayDelaySec.toFixed(2)} s` : '';
+    const coarse = this.isCwt && this.cwtSkip > 1 ? `${this.cwtSkip}× step` : '';
+    const parts = L.compact
+      ? [delay, coarse].filter(Boolean)
+      : [this.isCwt ? 'CWT' : '', delay ? `display ${delay}` : '', coarse, `${range} amplitude`].filter(Boolean);
+    const note = parts.join(' · ');
+    if (note) {
+      ctx.font = '500 10px "JetBrains Mono", monospace';
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
+      const tw = ctx.measureText(note).width + 10;
+      const nx = r.x + r.w - 6;
+      const ny = r.y + r.h - 12;
+      ctx.fillStyle = th.tagBg;
+      ctx.fillRect(nx - tw, ny - 8, tw, 16);
+      ctx.fillStyle = th.title;
+      ctx.fillText(note, nx - 5, ny + 0.5);
+    }
 
     if (hover && this.axes.inRect(hover.x, hover.y)) {
       const freq = this.axes.pxToY(hover.y);

@@ -48,6 +48,12 @@ export class AudioEngine {
   }
 
   async #ensureContext() {
+    if (this.ctx && this.ctx.state === 'closed') {
+      // the platform closed the context while we were in the background
+      this.ctx = null;
+      this.workletNode = null;
+      this.monitorGain = null;
+    }
     if (!this.ctx) {
       this.ctx = new (window.AudioContext || window.webkitAudioContext)({
         latencyHint: 'interactive',
@@ -160,9 +166,25 @@ export class AudioEngine {
     this.running = false;
   }
 
+  /**
+   * Resume after a pause or after the app returns from the background.
+   * Self-healing: if the platform closed or would not resume the context,
+   * or ended the microphone track (iOS does both when another app takes
+   * the audio session), the whole graph is rebuilt for the current source.
+   */
   async resume() {
-    if (this.ctx && this.ctx.state === 'suspended') await this.ctx.resume();
-    this.running = this.currentSourceId !== null;
+    if (this.currentSourceId === null) return;
+    if (this.ctx && this.ctx.state !== 'closed' && this.ctx.state !== 'running') {
+      try {
+        await Promise.race([this.ctx.resume(), new Promise((res) => setTimeout(res, 1500))]);
+      } catch { /* fall through to a rebuild */ }
+    }
+    const trackDead = !!this.mediaStream && this.mediaStream.getTracks().some((t) => t.readyState === 'ended');
+    if (!this.ctx || this.ctx.state !== 'running' || trackDead) {
+      await this.start(this.currentSourceId);
+      return;
+    }
+    this.running = true;
   }
 
   stop() {

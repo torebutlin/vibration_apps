@@ -2,7 +2,6 @@
 
 import { AudioEngine } from '../../../shared/js/audio/engine.js';
 import { PlotInteraction } from '../../../shared/js/plot/interaction.js';
-import { fmtHz } from '../../../shared/js/plot/axes.js';
 import { State, effectiveFreqScale } from './state.js';
 import { SpectrumView } from './views/spectrum.js';
 import { SpectrogramView } from './views/spectrogram.js';
@@ -36,9 +35,6 @@ let started = false;
 const mqNarrow = window.matchMedia('(max-width: 860px)');
 const mqPortrait = window.matchMedia('(orientation: portrait)');
 const layout = { compact: false, yInside: false, padTop: 0, padBottom: 0 };
-const hud = document.getElementById('hud');
-const topbar = document.getElementById('topbar');
-const stage = document.getElementById('stage');
 
 // safe-area insets, exposed by app.css as --sat / --sab so the canvas can
 // keep its axes clear of the notch and the home indicator
@@ -49,14 +45,10 @@ function safeInset(name) {
 function applyLayout() {
   layout.compact = mqNarrow.matches;
   layout.yInside = mqNarrow.matches && mqPortrait.matches;
-  // on narrow screens the pill rows float over the canvas: reserve their
+  // on narrow screens the pill row floats over the canvas: reserve its
   // height (10 px gap + 40 px pill + 10 px gap) so axes and labels stay visible
   layout.padTop = layout.compact ? 60 + safeInset('--sat') : 0;
-  layout.padBottom = layout.compact && mqPortrait.matches ? 60 + safeInset('--sab') : 0;
-  // landscape phones carry the readouts in the header row
-  const inHeader = layout.compact && !mqPortrait.matches;
-  if (inHeader && hud.parentElement !== topbar) topbar.insertBefore(hud, document.getElementById('topbar-right'));
-  if (!inHeader && hud.parentElement !== stage) stage.appendChild(hud);
+  layout.padBottom = layout.compact ? safeInset('--sab') : 0;
 }
 
 mqNarrow.addEventListener('change', applyLayout);
@@ -148,10 +140,23 @@ async function toggleRun() {
     await engine.pause();
     document.body.classList.remove('running');
     btnRun.textContent = '▶ Resume';
-  } else {
+    return;
+  }
+  btnRun.disabled = true;
+  try {
+    // self-healing: rebuilds the audio graph if the platform tore it down
     await engine.resume();
+    if (!engine.running) throw new Error('audio did not resume');
     document.body.classList.add('running');
     btnRun.textContent = '❚❚ Pause';
+    for (const v of Object.values(views)) v.setSampleRate(engine.sampleRate);
+  } catch (err) {
+    console.error(err);
+    toast('Audio could not resume — restarting the source.');
+    started = false;
+    await startEngine();
+  } finally {
+    btnRun.disabled = false;
   }
 }
 
@@ -176,17 +181,28 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && document.body.classList.contains('fullview')) setFullview(false);
 });
 
+// Coming back from the background: the platform may have suspended or
+// closed the audio graph (or ended the mic track). resume() self-heals.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && started && engine.running) {
+    engine.resume().catch((err) => console.error(err));
+  }
+});
+
 engine.onOverload = () => {
   lastClip = performance.now();
 };
 
 // ---------- full-screen view ----------
+// One button at the plot's top-right toggles; it reads ⤢ or ✕.
 
-const btnExitFull = document.getElementById('btn-exit-full');
+const btnFull = document.getElementById('btn-full');
 
 function setFullview(on) {
   document.body.classList.toggle('fullview', on);
-  btnExitFull.hidden = !on;
+  btnFull.textContent = on ? '✕' : '⤢';
+  btnFull.title = on ? 'Exit full screen (Esc)' : 'Full screen — hide all controls';
+  btnFull.setAttribute('aria-label', on ? 'Exit full screen' : 'Full screen');
   if (on) {
     document.documentElement.requestFullscreen?.().catch(() => { /* iOS: CSS-only */ });
   } else if (document.fullscreenElement) {
@@ -194,8 +210,7 @@ function setFullview(on) {
   }
 }
 
-document.getElementById('btn-full').addEventListener('click', () => setFullview(true));
-btnExitFull.addEventListener('click', () => setFullview(false));
+btnFull.addEventListener('click', () => setFullview(!document.body.classList.contains('fullview')));
 document.addEventListener('fullscreenchange', () => {
   if (!document.fullscreenElement) setFullview(false);
 });
@@ -203,12 +218,11 @@ document.addEventListener('fullscreenchange', () => {
 // ---------- theme ----------
 
 const btnTheme = document.getElementById('btn-theme');
+const btnTheme2 = document.getElementById('btn-theme2');
+const metaTheme = document.querySelector('meta[name="theme-color"]');
 
 // ︎ forces text (not emoji) rendering of the sun/moon glyphs
 const THEME_GLYPH = { dark: '☀︎', light: '☽︎' };
-
-const btnTheme2 = document.getElementById('btn-theme2');
-const metaTheme = document.querySelector('meta[name="theme-color"]');
 
 function syncThemeColor() {
   // browser chrome / status bar follows the page ground of the active theme
@@ -261,13 +275,22 @@ const roPeak = document.getElementById('ro-peak');
 const roPeakWrap = document.getElementById('ro-peak-wrap');
 const roAvg = document.getElementById('ro-avg');
 const roAvgWrap = document.getElementById('ro-avg-wrap');
+const roFs2 = document.getElementById('ro-fs2');
+const roRes2 = document.getElementById('ro-res2');
 let lastReadout = 0;
+
+function fmtRes(binHz) {
+  return `${binHz.toFixed(binHz < 10 ? 2 : 1)} Hz`;
+}
 
 function updateReadouts(now) {
   if (now - lastReadout < 250) return;
   lastReadout = now;
   const view = state.get('view');
   roFs.textContent = started ? engine.sampleRate : '—';
+  // beside the settings: sample rate next to Input, Δf next to FFT size
+  roFs2.textContent = started ? `${(engine.sampleRate / 1000).toFixed(1)} kHz` : '—';
+  roRes2.textContent = `Δf ${fmtRes(engine.sampleRate / state.get('fftSize'))}`;
   if (view === 'spectrum') {
     roRes.textContent = views.spectrum.resolutionText;
     const p = views.spectrum.dominantPeak;
@@ -283,7 +306,7 @@ function updateReadouts(now) {
       const s = views.spectrogram;
       roRes.textContent = s.isCwt
         ? `CWT ${state.get('cwtBinsPerOctave')}/oct`
-        : `${(engine.sampleRate / state.get('fftSize')).toFixed(1)} Hz`;
+        : fmtRes(engine.sampleRate / state.get('fftSize'));
     } else {
       const span = state.get('scopeSpan');
       roRes.textContent = span < 1 ? `${(span * 1000).toFixed(0)} ms` : `${span} s`;
