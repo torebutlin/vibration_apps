@@ -5,6 +5,7 @@ import { SpectrumProcessor } from '../../../../shared/js/dsp/spectrum.js';
 import { MultiResSpectrum } from '../../../../shared/js/dsp/multires.js';
 import { findPeaks } from '../../../../shared/js/dsp/peaks.js';
 import { Axes, fmtHz, plotTheme, plotLayout } from '../../../../shared/js/plot/axes.js';
+import { AxisLimit, levelStats } from '../../../../shared/js/plot/autorange.js';
 import { FrameHopper } from '../../../../shared/js/dsp/hop.js';
 import { freqRange } from '../state.js';
 
@@ -18,6 +19,18 @@ const QUANTITY = 'psd';
 // towards "N averages" (weight = hop / (N/2)). Matched to the capture
 // batch, which is what actually paces the display.
 const HOP_MAX = 1024;
+
+// Auto range (dB). The axis is fitted to the bold traces — the displayed
+// spectrum, plus peak hold when it is on. The instantaneous ghost is left
+// out on purpose: individual bins of a single periodogram swing tens of dB
+// from frame to frame, and an axis that made room for every dip would keep
+// the averaged trace squashed into the top of the plot. The ghost is
+// clipped instead, at both ends.
+const AUTO_SPAN_MIN = 40;      // dB: never a tighter axis than this
+const AUTO_SPAN_MAX = 120;     // dB: nor a wider one
+const AUTO_FLOOR_TAIL = 0.02;  // fraction of bins allowed below the floor
+const AUTO_FLOOR_MARGIN = 8;   // dB of clearance under the floor level
+const LEVEL_DEPTH = 160;       // dB below the peak the floor can be found
 
 function hexToRgba(hex, alpha) {
   const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
@@ -37,13 +50,17 @@ export class SpectrumView {
     this.peakDisplay = null;
     this.instDisplay = null;
     this.persistCanvas = null;
-    // auto-range state: expand instantly, hold while data is near the top,
-    // release slowly (see #trackAutoRange)
-    this.autoTop = -20;         // dB mode ceiling
-    this.autoMaxLin = 1;        // linear mode ceiling
-    this.lastNearTop = 0;
+    this.persistKey = null;     // axis geometry the phosphor was drawn for
+    // auto range: one limit per end of the y axis (see AxisLimit)
+    this.autoTop = new AxisLimit(-20, +1);       // dB ceiling
+    // the floor gives ground back after a smaller change than the ceiling:
+    // one step of the 5 dB grid it is quantized to, so the plot stays full
+    this.autoBottom = new AxisLimit(-130, -1, { holdBand: 5 });
+    this.autoMaxLin = new AxisLimit(1, +1);      // linear ceiling
+    this.levelHist = new Int32Array(LEVEL_DEPTH); // scratch for levelStats
     this.lastRangeTick = 0;
     this.snapRange = true;      // next frame jumps straight to the required range
+    this.dataFrames = 0;        // frames processed since the average was reset
     this.dominantPeak = null;   // {freq, db} for the header readout
     this.hopper = new FrameHopper(HOP_MAX); // frames advance on samples, not display refresh
     this.lastProcAt = 0;
@@ -55,8 +72,10 @@ export class SpectrumView {
       this.clearPersistence();
       this.snapRange = true;
     });
-    // discontinuous display changes: re-range instantly, don't glide
-    state.on(['freqMin', 'freqMax', 'freqAuto', 'freqScale', 'resMode'], () => {
+    // discontinuous display changes: re-range instantly, don't glide.
+    // avgMode and peakHold belong here too — they change which traces the
+    // range is fitted to, and how far down they reach.
+    state.on(['freqMin', 'freqMax', 'freqAuto', 'freqScale', 'resMode', 'avgMode', 'peakHold', 'ampAuto'], () => {
       this.snapRange = true;
     });
     window.addEventListener('themechange', () => this.clearPersistence());
@@ -78,6 +97,7 @@ export class SpectrumView {
     this.instDisplay = new Float32Array(this.proc.nBins);
     this.clearPersistence();
     this.hopper?.reset();
+    this.dataFrames = 0;
   }
 
   #applyAveraging() {
@@ -91,6 +111,7 @@ export class SpectrumView {
       ...opts,
       expTimeConst: Math.max(opts.expTimeConst, 0.1),
     });
+    this.dataFrames = 0; // setAveraging clears the averages: re-range on the next one
   }
 
   setSampleRate(fs) {
@@ -103,6 +124,7 @@ export class SpectrumView {
   resetAverage() {
     this.proc.resetAverage();
     this.multi.resetAverage();
+    this.dataFrames = 0;
   }
 
   resetPeakHold() {
@@ -111,8 +133,11 @@ export class SpectrumView {
   }
 
   clearPersistence() {
+    this.persistKey = null;
     if (this.persistCanvas) {
-      this.persistCanvas.getContext('2d').clearRect(0, 0, this.persistCanvas.width, this.persistCanvas.height);
+      const pc = this.persistCanvas.getContext('2d');
+      pc.setTransform(1, 0, 0, 1, 0, 0);
+      pc.clearRect(0, 0, this.persistCanvas.width, this.persistCanvas.height);
     }
   }
 
@@ -147,6 +172,9 @@ export class SpectrumView {
     } else {
       this.proc.process(view, dt, weight);
     }
+    // the display held nothing but the -300 dB floor until now: fit the
+    // axis to the first real spectrum instead of gliding down from silence
+    if (this.dataFrames++ === 0) this.snapRange = true;
   }
 
   /** Current frequency range honouring auto/manual state. */
@@ -194,41 +222,45 @@ export class SpectrumView {
       }
     }
 
+    // the bold traces — the ones the axis is fitted to
     const rangeArrays = peakSegments ? [...segments, ...peakSegments] : segments;
-    const scanPeak = (init) => {
-      let peak = init;
-      for (const seg of rangeArrays) {
-        for (let i = 0; i < seg.values.length; i++) {
-          const f = (seg.startBin + i) * seg.binHz;
-          if (f >= fr.min && f <= fr.max && seg.values[i] > peak) peak = seg.values[i];
-        }
-      }
-      return peak;
-    };
 
     // y range
     let yMin;
     let yMax;
-    if (dB) {
-      if (s.get('ampAuto')) {
-        // required ceiling: headroom for the peak labels (more in big
-        // label mode), quantized to 5 dB steps
-        const headroom = s.get('labelSize') === 'big' ? 12 : 6;
-        const peak = scanPeak(-160);
-        const required = Math.max(Math.min(Math.ceil((peak + headroom) / 5) * 5, 20), -60);
-        this.autoTop = this.#trackAutoRange(this.autoTop, required, 12);
-        yMax = this.autoTop;
-        yMin = this.autoTop - 110;
-      } else {
-        yMin = s.get('ampMin');
-        yMax = s.get('ampMax');
-      }
+    if (dB && !s.get('ampAuto')) {
+      yMin = s.get('ampMin');
+      yMax = s.get('ampMax');
     } else {
-      const peak = scanPeak(0);
-      const required = Math.max(peak * 1.15, 1e-12);
-      this.autoMaxLin = this.#trackAutoRange(this.autoMaxLin, required, this.autoMaxLin * 0.5);
-      yMin = 0;
-      yMax = this.autoMaxLin;
+      const step = this.#rangeStep();
+      const stats = levelStats(rangeArrays, fr.min, fr.max, {
+        tail: AUTO_FLOOR_TAIL,
+        depth: LEVEL_DEPTH,
+        floor: dB,              // a linear axis is anchored at zero
+        hist: this.levelHist,
+      });
+      if (dB) {
+        // ceiling: headroom for the peak labels (more in big label mode),
+        // quantized to 5 dB steps
+        const headroom = s.get('labelSize') === 'big' ? 12 : 6;
+        const peak = stats ? stats.peak : -160;
+        const top = Math.max(Math.min(Math.ceil((peak + headroom) / 5) * 5, 20), -60);
+        yMax = this.autoTop.track(top, step);
+        // floor: just under the body of the bold traces, so the plot is
+        // filled by the measurement rather than by empty decades below it
+        const low = stats ? stats.low : yMax - AUTO_SPAN_MAX;
+        const bottom = Math.min(
+          Math.max(Math.floor((low - AUTO_FLOOR_MARGIN) / 5) * 5, yMax - AUTO_SPAN_MAX),
+          yMax - AUTO_SPAN_MIN
+        );
+        yMin = this.autoBottom.track(bottom, step);
+        // the ceiling may have dropped faster than the floor has risen
+        yMin = Math.min(yMin, yMax - AUTO_SPAN_MIN);
+      } else {
+        const required = Math.max((stats ? stats.peak : 0) * 1.15, 1e-12);
+        yMax = this.autoMaxLin.track(required, step, this.autoMaxLin.value * 0.5);
+        yMin = 0;
+      }
     }
     this.axes.setY(yMin, yMax, false);
 
@@ -263,14 +295,16 @@ export class SpectrumView {
 
     const legend = [];
 
-    // instantaneous ghost trace (averaging on)
+    // instantaneous ghost trace (averaging on) — drawn only where it is on
+    // scale: the axis is fitted to the bold traces, and one periodogram
+    // swings tens of dB either side of them
     const showGhost = s.get('avgMode') !== 'off';
     if (showGhost) {
       if (multires) {
-        this.#stroke(ctx, this.multi.segments(quantity, dB, 'inst'), th.traceGhost, 1);
+        this.#stroke(ctx, this.multi.segments(quantity, dB, 'inst'), th.traceGhost, 1, true);
       } else {
         this.proc.toDisplay(this.proc.power, this.instDisplay, quantity, dB);
-        this.#stroke(ctx, [{ binHz: this.proc.binHz, startBin: 0, values: this.instDisplay }], th.traceGhost, 1);
+        this.#stroke(ctx, [{ binHz: this.proc.binHz, startBin: 0, values: this.instDisplay }], th.traceGhost, 1, true);
       }
     }
 
@@ -352,32 +386,16 @@ export class SpectrumView {
     }
   }
 
-  /**
-   * Attack / hold / release for the auto range ceiling:
-   *  - never clip: expand to `required` immediately;
-   *  - hold while the data peak stays within `holdBand` of the ceiling;
-   *  - after 1.5 s below that, settle down slowly (tau 2.5 s) so the data
-   *    refills the plot without the axis jumping around.
-   */
-  #trackAutoRange(current, required, holdBand) {
+  /** One tick of the auto-range clock, shared by both ends of the axis:
+   *  the frame time, and whether this frame is a snap (a setting changed
+   *  that makes gliding meaningless). */
+  #rangeStep() {
     const now = performance.now();
     const dt = Math.min((now - this.lastRangeTick) / 1000, 0.1);
     this.lastRangeTick = now;
-    if (this.snapRange) {
-      this.snapRange = false;
-      this.lastNearTop = now;
-      return required;
-    }
-    if (required >= current) {
-      this.lastNearTop = now;
-      return required;
-    }
-    if (required > current - holdBand) {
-      this.lastNearTop = now;
-      return current;
-    }
-    if (now - this.lastNearTop < 1500) return current;
-    return current + (1 - Math.exp(-dt / 2.5)) * (required - current);
+    const snap = this.snapRange;
+    this.snapRange = false;
+    return { now, dt, snap };
   }
 
   #drawLegend(ctx, entries, th, bottom = false) {
@@ -408,14 +426,28 @@ export class SpectrumView {
       this.persistCanvas = document.createElement('canvas');
       this.persistCanvas.width = ctx.canvas.width;
       this.persistCanvas.height = ctx.canvas.height;
+      this.persistKey = null;
     }
     const pc = this.persistCanvas.getContext('2d');
     const dpr = ctx.canvas.width / w;
     pc.setTransform(dpr, 0, 0, dpr, 0, 0);
-    // fade history
-    pc.globalCompositeOperation = 'destination-out';
-    pc.fillStyle = 'rgba(0, 0, 0, 0.045)';
-    pc.fillRect(0, 0, w, h);
+    // The phosphor is a picture in pixels, so it only means anything while
+    // the axes stay put: once they move (the auto range settling, a zoom, a
+    // resize) every old stroke is at the wrong level. Start again rather
+    // than smear — the fade alone would not do it, as a canvas fading by a
+    // fraction of an 8-bit alpha stalls a few percent short of clear.
+    const ax = this.axes;
+    const key = [ax.x.min, ax.x.max, ax.y.min, ax.y.max, ax.rect.x, ax.rect.y, ax.rect.w, ax.rect.h];
+    const moved = !this.persistKey || key.some((v, i) => v !== this.persistKey[i]);
+    this.persistKey = key;
+    if (moved) {
+      pc.clearRect(0, 0, w, h);
+    } else {
+      // fade history
+      pc.globalCompositeOperation = 'destination-out';
+      pc.fillStyle = 'rgba(0, 0, 0, 0.045)';
+      pc.fillRect(0, 0, w, h);
+    }
     // add current trace ('lighter' glows on dark; plain alpha build-up on light)
     pc.globalCompositeOperation = th.persistComp;
     pc.strokeStyle = th.persistColor;
@@ -425,7 +457,14 @@ export class SpectrumView {
     ctx.drawImage(this.persistCanvas, 0, 0, w, h);
   }
 
-  #tracePath(ctx, seg) {
+  /**
+   * Path along one segment of a trace.
+   * @param {boolean} skipOffScale drop the bins that fall outside the y
+   *   axis instead of letting the clip cut them off. The auto range follows
+   *   the bold traces, so the live one swings past both ends; drawn whole
+   *   it would leave a comb of vertical strokes along the edges of the plot.
+   */
+  #tracePath(ctx, seg, skipOffScale = false) {
     const { binHz, startBin, values } = seg;
     const ax = this.axes;
     ctx.beginPath();
@@ -436,8 +475,13 @@ export class SpectrumView {
       const f = (startBin + i) * binHz;
       if (f < fMin - binHz || f > fMax + binHz) continue;
       if (ax.x.log && f <= 0) continue;
+      const v = values[i];
+      if (skipOffScale && (v < ax.y.min || v > ax.y.max)) {
+        started = false;
+        continue;
+      }
       const px = ax.xToPx(Math.max(f, 1e-3));
-      const py = ax.yToPx(values[i]);
+      const py = ax.yToPx(v);
       if (!started) {
         ctx.moveTo(px, py);
         started = true;
@@ -447,12 +491,12 @@ export class SpectrumView {
     }
   }
 
-  #stroke(ctx, segments, color, width) {
+  #stroke(ctx, segments, color, width, skipOffScale = false) {
     ctx.strokeStyle = color;
     ctx.lineWidth = width;
     ctx.lineJoin = 'round';
     for (const seg of segments) {
-      this.#tracePath(ctx, seg);
+      this.#tracePath(ctx, seg, skipOffScale);
       ctx.stroke();
     }
   }

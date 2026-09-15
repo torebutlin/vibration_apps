@@ -6,7 +6,7 @@
 // CSS/JS for ten minutes after a deploy. Bump CACHE_VERSION when shipping
 // changes to force old caches out.
 
-const CACHE_VERSION = 'livefft-v20';
+const CACHE_VERSION = 'livefft-v21';
 
 const PRECACHE = [
   './',
@@ -41,6 +41,7 @@ const PRECACHE = [
   '../../shared/js/dsp/multires.js',
   '../../shared/js/dsp/cwt.js',
   '../../shared/js/plot/axes.js',
+  '../../shared/js/plot/autorange.js',
   '../../shared/js/plot/colormap.js',
   '../../shared/js/plot/interaction.js',
   '../../shared/js/plot/rows.js',
