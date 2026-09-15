@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { plotLayout } from '../shared/js/plot/axes.js';
+import { plotLayout, plotTheme } from '../shared/js/plot/axes.js';
 import { rowRanges, rowMax } from '../shared/js/plot/rows.js';
 import { minMaxEnvelope } from '../shared/js/plot/envelope.js';
 import { rfftMagSq } from '../shared/js/dsp/fft.js';
@@ -31,6 +31,34 @@ test('plotLayout: narrow portrait puts the y labels inside', () => {
   assert.equal(L.yInside, true);
   assert.equal(L.xTitle, false);
   assert.equal(L.yTitle, false);
+});
+
+// ---------- plotTheme ----------
+
+test('plotTheme follows a theme switch in the same tick', () => {
+  // Anything repainting from the themechange event reads this straight
+  // away, before a microtask could have invalidated a cache — so the
+  // colours have to be right synchronously, not one switch behind.
+  const COLOURS = {
+    dark: { '--bg-inset': '#0a0d14', '--trace-main': '#3fe8d2' },
+    light: { '--bg-inset': '#f4f6f9', '--trace-main': '#12a594' },
+  };
+  const root = { dataset: { theme: 'dark' } };
+  globalThis.document = { documentElement: root };
+  globalThis.getComputedStyle = () => ({
+    getPropertyValue: (name) => COLOURS[root.dataset.theme][name] ?? '',
+  });
+  try {
+    assert.equal(plotTheme().bg, '#0a0d14');
+    root.dataset.theme = 'light';
+    assert.equal(plotTheme().bg, '#f4f6f9', 'read back light in the same tick');
+    assert.equal(plotTheme().traceMain, '#12a594');
+    root.dataset.theme = 'dark';
+    assert.equal(plotTheme().bg, '#0a0d14', 'and back again');
+  } finally {
+    delete globalThis.document;
+    delete globalThis.getComputedStyle;
+  }
 });
 
 test('plotLayout: padTop/padBottom reserve room for floating pill rows', () => {

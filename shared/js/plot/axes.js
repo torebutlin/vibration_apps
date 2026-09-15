@@ -8,11 +8,19 @@ const FONTS = {
 };
 
 // Plot colours come from the CSS custom properties in shared/css/theme.css,
-// so the canvas follows the active light/dark theme. Cached per theme.
+// so the canvas follows the active light/dark theme.
+//
+// The cache is keyed on the theme rather than invalidated when it changes.
+// An observer would do the invalidating in a microtask, which runs after
+// the themechange listeners that read these colours — so anything that
+// repaints from that event (the spectrogram's colormap ground) would be
+// painted in the theme just left, and stay wrong until the next switch.
 let cachedTheme = null;
+let cachedFor = null;
 
 export function plotTheme() {
-  if (cachedTheme) return cachedTheme;
+  const theme = document.documentElement.dataset.theme || '';
+  if (cachedTheme && cachedFor === theme) return cachedTheme;
   const cs = getComputedStyle(document.documentElement);
   const v = (name, fallback) => cs.getPropertyValue(name).trim() || fallback;
   cachedTheme = {
@@ -35,13 +43,8 @@ export function plotTheme() {
     rubber: v('--plot-rubber', 'rgba(56,225,200,0.08)'),
     rubberLine: v('--plot-rubber-line', 'rgba(56,225,200,0.4)'),
   };
+  cachedFor = theme;
   return cachedTheme;
-}
-
-if (typeof document !== 'undefined') {
-  new MutationObserver(() => {
-    cachedTheme = null;
-  }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 }
 
 /** Format a frequency-like value compactly: 850, 1.2k, 12.5k */
