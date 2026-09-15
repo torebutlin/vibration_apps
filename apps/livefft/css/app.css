@@ -311,9 +311,15 @@ body.fullview #app {
   grid-template-columns: 1fr;
 }
 
-body.fullview #btn-full {
-  top: calc(6px + env(safe-area-inset-top));
-  right: calc(8px + env(safe-area-inset-right));
+/* Wide screens only: with the header gone the button is what has to clear
+   the insets. On narrow ones the button has its own place in each
+   orientation (see below) — this must not override the landscape notch
+   inset, which it would on specificity alone. */
+@media (min-width: 861px) {
+  body.fullview #btn-full {
+    top: calc(6px + env(safe-area-inset-top));
+    right: calc(8px + env(safe-area-inset-right));
+  }
 }
 
 /* ---------- Help overlay ---------- */
@@ -499,7 +505,11 @@ body.fullview #btn-full {
     backdrop-filter: blur(6px);
     -webkit-backdrop-filter: blur(6px);
   }
-  body.fullview #btn-full { top: calc(10px + env(safe-area-inset-top)); }
+  /* full view: the pill row is gone, so the button takes its place */
+  body.fullview #btn-full {
+    top: calc(10px + env(safe-area-inset-top));
+    right: calc(10px + env(safe-area-inset-right));
+  }
 
   #peak-tools {
     right: calc(12px + env(safe-area-inset-right));
@@ -584,6 +594,7 @@ body.fullview #btn-full {
     padding-left: max(env(safe-area-inset-left), 44px);
     padding-right: max(env(safe-area-inset-right), 44px);
   }
-  #btn-full { right: calc(10px + max(env(safe-area-inset-right), 44px)); }
+  #btn-full,
+  body.fullview #btn-full { right: calc(10px + max(env(safe-area-inset-right), 44px)); }
   #peak-tools { right: calc(12px + max(env(safe-area-inset-right), 44px)); }
 }

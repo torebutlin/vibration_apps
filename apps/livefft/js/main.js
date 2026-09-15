@@ -54,8 +54,34 @@ function applyLayout() {
   layout.padBottom = layout.compact ? safeInset('--sab') : 0;
 }
 
+// Rotating the device changes which safe-area insets are non-zero, but the
+// media-query event can arrive before the browser has finished laying the
+// page out, so env() still reads the old orientation. Re-apply as the
+// viewport settles rather than trusting the first reading — and note when
+// a rotation happened: a native full screen that ends inside that window
+// was dropped by the rotation, not by the user (see setFullview).
+let lastRotation = 0;
+const ROTATE_GRACE_MS = 1500;
+
+function onRotate() {
+  lastRotation = performance.now();
+  applyLayout();
+  for (const ms of [50, 250, 600]) {
+    setTimeout(() => {
+      applyLayout();
+      resizeCanvas();
+    }, ms);
+  }
+}
+
 mqNarrow.addEventListener('change', applyLayout);
-mqPortrait.addEventListener('change', applyLayout);
+mqPortrait.addEventListener('change', onRotate);
+window.addEventListener('orientationchange', onRotate);
+screen.orientation?.addEventListener?.('change', onRotate);
+// entering or leaving full screen, and the phone browser's own chrome
+// appearing, move the insets too
+window.addEventListener('resize', () => applyLayout());
+window.visualViewport?.addEventListener('resize', () => applyLayout());
 applyLayout();
 
 // ---------- canvas sizing ----------
@@ -99,7 +125,7 @@ const interaction = new PlotInteraction(canvas, views.spectrum.axes, {
   },
   onTap() {
     // on a phone the chrome is hidden in full view; a tap brings it back
-    if (layout.compact && document.body.classList.contains('fullview')) setFullview(false);
+    if (layout.compact && fullview) setFullview(false);
   },
 });
 
@@ -181,7 +207,7 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
     toggleRun();
   }
-  if (e.key === 'Escape' && document.body.classList.contains('fullview')) setFullview(false);
+  if (e.key === 'Escape' && fullview) setFullview(false);
 });
 
 // Coming back from the background: the platform may have suspended or
@@ -198,26 +224,82 @@ engine.onOverload = () => {
 
 // ---------- full-screen view ----------
 // One button at the plot's top-right toggles; it reads ⤢ or ✕.
+//
+// Two things can get out of step: the app's own chrome-free layout
+// (body.fullview) and the browser's native full screen. Only the first is
+// always available — iOS Safari has no element full screen at all, and
+// browsers can drop the native one by themselves, notably when the device
+// rotates. So body.fullview is the state the button reflects, since it is
+// what the user sees, and the button always undoes both.
 
 const btnFull = document.getElementById('btn-full');
 
-function setFullview(on) {
+const fullscreenApi = {
+  element: () => document.fullscreenElement || document.webkitFullscreenElement || null,
+  request(el) {
+    const fn = el.requestFullscreen || el.webkitRequestFullscreen;
+    try {
+      return Promise.resolve(fn?.call(el));
+    } catch {
+      return Promise.resolve();
+    }
+  },
+  exit() {
+    const fn = document.exitFullscreen || document.webkitExitFullscreen;
+    try {
+      return Promise.resolve(fn?.call(document));
+    } catch {
+      return Promise.resolve();
+    }
+  },
+};
+
+let fullview = false;
+
+function syncFullButton() {
+  btnFull.textContent = fullview ? '✕' : '⤢';
+  btnFull.title = fullview ? 'Exit full screen (Esc)' : 'Full screen — hide all controls';
+  btnFull.setAttribute('aria-label', fullview ? 'Exit full screen' : 'Full screen');
+}
+
+/**
+ * @param {boolean} on
+ * @param {boolean} [native] also ask the browser to enter or leave its own
+ *   full screen. False when we are merely following a change it made.
+ */
+function setFullview(on, native = true) {
+  fullview = on;
   document.body.classList.toggle('fullview', on);
   applyLayout(); // phones: the plot reclaims the pill row
-  btnFull.textContent = on ? '✕' : '⤢';
-  btnFull.title = on ? 'Exit full screen (Esc)' : 'Full screen — hide all controls';
-  btnFull.setAttribute('aria-label', on ? 'Exit full screen' : 'Full screen');
+  syncFullButton();
+  if (!native) return;
   if (on) {
-    document.documentElement.requestFullscreen?.().catch(() => { /* iOS: CSS-only */ });
-  } else if (document.fullscreenElement) {
-    document.exitFullscreen?.();
+    fullscreenApi.request(document.documentElement).catch(() => { /* iOS: CSS-only */ });
+  } else if (fullscreenApi.element()) {
+    fullscreenApi.exit().catch(() => { /* already out */ });
   }
 }
 
-btnFull.addEventListener('click', () => setFullview(!document.body.classList.contains('fullview')));
-document.addEventListener('fullscreenchange', () => {
-  if (!document.fullscreenElement) setFullview(false);
-});
+function onFullscreenChange() {
+  if (fullscreenApi.element()) {
+    // the browser put us in full screen without being asked: follow it
+    if (!fullview) setFullview(true, false);
+    return;
+  }
+  if (!fullview) return;
+  // Native full screen ended. Usually that is Esc or the browser's own
+  // gesture and the controls should come back — but a rotation can drop it
+  // on its own, which is not a request for them, and there is no user
+  // gesture left to re-enter with. Stay in the full view; the button (now
+  // the only way out, and still reading ✕) does the rest.
+  if (performance.now() - lastRotation < ROTATE_GRACE_MS) return;
+  setFullview(false, false);
+}
+
+btnFull.addEventListener('click', () => setFullview(!fullview));
+document.addEventListener('fullscreenchange', onFullscreenChange);
+document.addEventListener('webkitfullscreenchange', onFullscreenChange);
+syncFullButton();
 
 // ---------- theme ----------
 
