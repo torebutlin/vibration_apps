@@ -175,6 +175,13 @@ body.running #brand-name::after {
 .tool.on { color: var(--amber); border-color: var(--amber); }
 .tool:focus-visible { outline: 2px solid var(--accent-border); outline-offset: 1px; }
 
+/* Wavelet Q carries four options (three constant-Q settings and Ear), which
+   only fit the settings rail with less air around each label. The phone
+   sheet is wider than the rail and keeps the standard spacing. */
+@media (min-width: 861px) {
+  #row-cwtq .seg label { padding-left: 0.34rem; padding-right: 0.34rem; }
+}
+
 /* wavelet bins / octave: the option that matches the Q setting reads bold
    (desktop pickers; phone pickers ignore option styling, so the Auto entry
    also names the value) */

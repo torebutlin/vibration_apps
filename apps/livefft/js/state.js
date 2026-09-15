@@ -49,6 +49,7 @@ export const DEFAULTS = {
   cwtBinsPerOctave: 16,      // manual value; used when cwtBpoAuto is false
   cwtBpoAuto: true,          // follow Wavelet Q (see recommendedBinsPerOctave)
   cwtOmega0: 24,
+  cwtBwLaw: 'constq',        // constq (Q = omega0) | ear (auditory ERB widths)
 
   // scope
   scopeSpan: 0.05,           // seconds
@@ -132,11 +133,26 @@ export function recommendedBinsPerOctave(omega0, options = CWT_BPO_OPTIONS) {
   return best;
 }
 
+/**
+ * Morlet ω₀ the auditory bandwidth law is worth sampling as densely as.
+ * ERB(f) tends to f/9.26 in the treble, and a Gaussian of that ERB has
+ * σ_f = ERB/√(2π), so ω₀ = f/σ_f → 9.26·√(2π) ≈ 23. The scales are still
+ * geometric, so the top of the band — where the law is narrowest relative
+ * to frequency — is what the density has to satisfy.
+ */
+export const EAR_BINS_OMEGA0 = 23.2;
+
+/** The ω₀ the bin density should match: the setting under constant Q, the
+ *  law's tightest relative bandwidth under the auditory one. */
+export function binDensityOmega0(state) {
+  return state.get('cwtBwLaw') === 'ear' ? EAR_BINS_OMEGA0 : state.get('cwtOmega0');
+}
+
 /** Bins per octave the wavelet spectrogram actually uses: the Q-matched
  *  value while Auto, otherwise the manual setting. */
 export function effectiveBinsPerOctave(state) {
   return state.get('cwtBpoAuto')
-    ? recommendedBinsPerOctave(state.get('cwtOmega0'))
+    ? recommendedBinsPerOctave(binDensityOmega0(state))
     : state.get('cwtBinsPerOctave');
 }
 

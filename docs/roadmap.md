@@ -113,6 +113,27 @@ ideas are absorbed into I5 and D8).
 - `shared/js/audio/` — additive-synthesis helper with envelopes (I5, D1,
   D15); capture/record buffer with pretrigger (I2, I4, I3).
 
+## Parked (Live FFT spectrogram)
+
+Both fall out of the same loop and neither is needed yet.
+
+- **A causal third method.** STFT and Wavelet are both zero-phase, so an
+  impulse spreads symmetrically and the bass of a clap starts lighting the
+  plot before the clap. A causal filterbank cannot: a gammatone,
+  `t^(n-1) e^(-t/tau) e^(i 2 pi f t)`, is a bank of lightly damped
+  resonators, so the ringing follows the hit the way a struck structure
+  does — a good fit for a vibration course, and cheap as an IIR cascade.
+  It should use the auditory bandwidths (see Wavelet Q → Ear), not
+  constant Q, or it inherits the same sluggish bass.
+- **Per-scale compute cadence.** Every scale is evaluated at every column,
+  but scale j's output is bandlimited to about `2 f / omega0`, so the
+  bottom rows are oversampled by two orders of magnitude and the cost is
+  dominated by the octave nobody can see move. Evaluating each scale on
+  its own cadence and holding between makes the cost per scale
+  independent of frequency — several times cheaper at the defaults — at
+  the price of quantising each row's time axis to a fraction of its own
+  sigma, which then has to be reflected in the analysis edge.
+
 ## Staged plan
 
 Each stage is roughly one working session; every app lands as a draft

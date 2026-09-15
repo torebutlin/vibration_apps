@@ -5,6 +5,7 @@ import { DEMO_SOURCES } from '../../../shared/js/audio/engine.js';
 import {
   effectiveFreqScale,
   recommendedBinsPerOctave,
+  binDensityOmega0,
   CWT_BPO_OPTIONS,
   CWT_FLOOR_HZ,
 } from './state.js';
@@ -261,7 +262,23 @@ export function initUI(state, engine, callbacks) {
     $('ro-sgceil').textContent = v;
   });
 
-  bindSeg('cwtq', 'cwtOmega0', (v) => parseInt(v, 10));
+  // Wavelet Q: three constant-Q settings plus the auditory bandwidth law,
+  // which is not a Q at all, so it rides on its own key and leaves the last
+  // ω₀ in place for when the user switches back.
+  const qInputs = document.querySelectorAll('input[name="cwtq"]');
+  const qValue = () => (state.get('cwtBwLaw') === 'ear' ? 'ear' : String(state.get('cwtOmega0')));
+  const syncQ = () => {
+    for (const input of qInputs) input.checked = input.value === qValue();
+  };
+  for (const input of qInputs) {
+    input.addEventListener('change', () => {
+      if (!input.checked) return;
+      if (input.value === 'ear') state.set('cwtBwLaw', 'ear');
+      else state.update({ cwtBwLaw: 'constq', cwtOmega0: parseInt(input.value, 10) });
+    });
+  }
+  state.on(['cwtOmega0', 'cwtBwLaw'], syncQ);
+  syncQ();
 
   // Bins / octave: Auto follows the Q setting (two bins across each
   // wavelet's band — the option marked in the list); a number holds
@@ -272,7 +289,7 @@ export function initUI(state, engine, callbacks) {
   const bpoOpts = CWT_BPO_OPTIONS.map((n) => selBpo.appendChild(new Option(String(n), String(n))));
 
   function syncBpo() {
-    const rec = recommendedBinsPerOctave(state.get('cwtOmega0'));
+    const rec = recommendedBinsPerOctave(binDensityOmega0(state));
     optAuto.textContent = `Auto · ${rec}`;
     for (const o of bpoOpts) {
       const match = +o.value === rec;
@@ -286,7 +303,7 @@ export function initUI(state, engine, callbacks) {
     if (selBpo.value === 'auto') state.set('cwtBpoAuto', true);
     else state.update({ cwtBpoAuto: false, cwtBinsPerOctave: parseInt(selBpo.value, 10) });
   });
-  state.on(['cwtOmega0', 'cwtBpoAuto', 'cwtBinsPerOctave'], syncBpo);
+  state.on(['cwtOmega0', 'cwtBwLaw', 'cwtBpoAuto', 'cwtBinsPerOctave'], syncBpo);
   syncBpo();
 
   function updateCwtRows() {
@@ -366,6 +383,7 @@ export function initUI(state, engine, callbacks) {
       ['Peak hold', 'Hold (bottom right of the spectrum) keeps the maximum of the displayed trace since the last Reset, shown as the amber trace. With averaging on it holds the averaged level; switch averaging off to catch short transients.'],
       ['Full screen', 'The ⤢ button at the top right of the plot hides every control for a clean projected display; ✕ (or Esc) brings them back. On a phone, tapping the plot also brings them back.'],
       ['Levels', 'The spectrum is a density (dBFS per Hz), the spectrogram is amplitude (dBFS). The same tone therefore reads lower on the spectrum — about 15 dB lower at FFT 4096 — and the gap changes with FFT size and window.'],
+      ['Analysis edge', 'In the wavelet spectrogram the dashed curve at the right is how far each frequency has been analysed. A wavelet needs about four of its own widths of signal after the instant it reports on, and that width grows as the frequency falls, so the top of the plot is live and the bottom trails — by 0.8 s at 20 Hz on High Q. The curve is the time–frequency uncertainty principle drawn to scale. Wavelet Q → Ear follows the bandwidth of hearing instead and is live almost all the way down.'],
       ['Settings', 'On a phone, ☰ opens the settings sheet; drag it down, tap outside it or press Escape to close. Δf sits beside the FFT size, the sample rate beside the input.'],
     ]);
 
