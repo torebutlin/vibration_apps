@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   State,
+  DEFAULTS,
   CWT_BPO_OPTIONS,
   CWT_FLOOR_HZ,
   recommendedBinsPerOctave,
@@ -22,6 +23,38 @@ function fakeState(patch = {}) {
   };
   return { get: (k) => values[k] };
 }
+
+test('a first visit opens on the teaching setup', () => {
+  // spectrum, 4096 fixed-resolution, exponentially averaged over 2.5 s,
+  // dB up to 2 kHz with the range following the signal
+  assert.equal(DEFAULTS.view, 'spectrum');
+  assert.equal(DEFAULTS.fftSize, 4096);
+  assert.equal(DEFAULTS.resMode, 'standard');
+  assert.equal(DEFAULTS.avgMode, 'exponential');
+  assert.equal(DEFAULTS.expTimeConst, 2.5);
+  assert.equal(DEFAULTS.labelSize, 'std');
+  assert.equal(DEFAULTS.dB, true);
+  assert.equal(DEFAULTS.freqScale, 'auto');
+  assert.equal(DEFAULTS.freqAuto, false);
+  assert.equal(DEFAULTS.freqMax, 2000);
+  assert.equal(DEFAULTS.ampAuto, true);
+  // spectrogram: wavelet at high Q, its bin density following that Q
+  assert.equal(DEFAULTS.sgMode, 'cwt');
+  assert.equal(DEFAULTS.cwtOmega0, 24);
+  assert.equal(DEFAULTS.cwtBpoAuto, true);
+  assert.equal(effectiveBinsPerOctave({ get: (k) => DEFAULTS[k] }), 32);
+  assert.equal(DEFAULTS.sgSpan, 5);
+  assert.equal(DEFAULTS.sgColormap, 'inferno');
+});
+
+test('the default range reads back as the "to 2 kHz" preset', () => {
+  // the preset picker recognises a range that starts at DC or the 20 Hz
+  // floor; the wavelet spectrogram starts it at the floor either way
+  const state = { get: (k) => DEFAULTS[k] };
+  assert.ok(DEFAULTS.freqMin <= CWT_FLOOR_HZ);
+  assert.deepEqual(freqRange(state, 'spectrum', 48000), { min: 0, max: 2000, log: false });
+  assert.deepEqual(freqRange(state, 'spectrogram', 48000), { min: CWT_FLOOR_HZ, max: 2000, log: true });
+});
 
 test('bins per octave that match the wavelet Q: 8 / 16 / 32 for ω₀ = 6 / 12 / 24', () => {
   assert.equal(recommendedBinsPerOctave(6), 8);

@@ -2,8 +2,14 @@
 // persistence. Transient runtime state (running, overload) is kept out of
 // persistence.
 
-const STORAGE_KEY = 'livefft-settings-v1';
+// Bumped when the defaults below change enough that a device carrying the
+// old ones would not be showing what the app is meant to open with.
+const STORAGE_KEY = 'livefft-settings-v2';
 
+// What the app opens with on a device that has never used it: a 4096-point
+// spectrum up to 2 kHz, averaged over a couple of seconds so the trace is
+// readable rather than flickering, and a wavelet spectrogram ready in the
+// next tab.
 export const DEFAULTS = {
   view: 'spectrum',          // spectrum | spectrogram | scope
   source: 'mic',
@@ -15,7 +21,7 @@ export const DEFAULTS = {
   dB: true,
   resMode: 'standard',       // standard | multires
   avgMode: 'exponential',    // off | exponential | linear
-  expTimeConst: 0.5,
+  expTimeConst: 2.5,
   linearTarget: 16,
   peakHold: false,
   peakLabels: 4,
@@ -25,8 +31,8 @@ export const DEFAULTS = {
   // frequency axis (shared: spectrum x, spectrogram y, and the range the
   // wavelet spectrogram analyses)
   freqScale: 'auto',         // auto | linear | log
-  freqMin: 20,
-  freqMax: 5000,
+  freqMin: 0,
+  freqMax: 2000,
   freqAuto: false,           // true = full 0..fs/2 (or 20..fs/2 in log)
 
   // amplitude axis
@@ -35,14 +41,14 @@ export const DEFAULTS = {
   ampMax: 5,
 
   // spectrogram
-  sgMode: 'stft',            // stft | cwt
-  sgSpan: 10,                // seconds
+  sgMode: 'cwt',             // stft | cwt
+  sgSpan: 5,                 // seconds
   sgColormap: 'inferno',
   sgFloorDb: -95,
   sgCeilDb: -15,
   cwtBinsPerOctave: 16,      // manual value; used when cwtBpoAuto is false
   cwtBpoAuto: true,          // follow Wavelet Q (see recommendedBinsPerOctave)
-  cwtOmega0: 12,
+  cwtOmega0: 24,
 
   // scope
   scopeSpan: 0.05,           // seconds
