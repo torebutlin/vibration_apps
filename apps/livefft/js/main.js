@@ -156,12 +156,14 @@ function activeView() {
   return views[state.get('view')];
 }
 
-// Zooming the frequency axis by drag or pinch replaces the Range setting,
-// so the range in force when a zoom started is kept: a reset puts that back
-// rather than jumping to the whole spectrum, which is rarely what someone
-// who set up a 2 kHz view wants. A reset with nothing to undo shows the
-// full range, and any other change to the range drops the memory.
-let rangeBeforeZoom = null;
+// Zooming the frequency axis writes the same setting the Range control
+// does, so the app keeps the chosen range: whatever the Range control (or
+// the defaults) last said, as opposed to the temporary look a drag or a
+// pinch gives. A reset comes back to it — the teaching setup opens at
+// 0–2 kHz, and that is where a double tap should land.
+const rangeKeys = ['freqAuto', 'freqMin', 'freqMax'];
+const currentRange = () => Object.fromEntries(rangeKeys.map((k) => [k, state.get(k)]));
+let chosenRange = currentRange();
 let zoomingRange = false;
 
 function zoomRange(patch) {
@@ -170,28 +172,41 @@ function zoomRange(patch) {
   zoomingRange = false;
 }
 
+// The wavelet spectrogram analyses exactly the range it displays, so every
+// change restarts it. A pinch would do that on each frame of the gesture:
+// hold the last one until the fingers stop, then apply it once.
+let sgZoomTimer = null;
+
+function zoomRangeSettled(patch) {
+  clearTimeout(sgZoomTimer);
+  sgZoomTimer = setTimeout(() => zoomRange(patch), 150);
+}
+
+/** Frequency range from a zoom gesture, clamped to what can be analysed. */
+function zoomedRange(min, max, context) {
+  const log = effectiveFreqScale(state, context) === 'log';
+  min = Math.max(log ? 1 : 0, min);
+  max = Math.min(engine.sampleRate / 2, max);
+  if (max - min < 10) return null;
+  return { freqAuto: false, freqMin: Math.round(min * 10) / 10, freqMax: Math.round(max * 10) / 10 };
+}
+
 const interaction = new PlotInteraction(canvas, views.spectrum.axes, {
   onXRange(min, max) {
     if (state.get('view') !== 'spectrum') return;
-    const fs = engine.sampleRate;
-    const log = effectiveFreqScale(state, 'spectrum') === 'log';
-    min = Math.max(log ? 1 : 0, min);
-    max = Math.min(fs / 2, max);
-    if (max - min < 10) return;
-    if (!rangeBeforeZoom) {
-      rangeBeforeZoom = {
-        freqAuto: state.get('freqAuto'),
-        freqMin: state.get('freqMin'),
-        freqMax: state.get('freqMax'),
-      };
-    }
-    zoomRange({ freqAuto: false, freqMin: Math.round(min * 10) / 10, freqMax: Math.round(max * 10) / 10 });
+    const patch = zoomedRange(min, max, 'spectrum');
+    if (patch) zoomRange(patch);
+  },
+  // the spectrogram's frequency axis is the vertical one
+  onYRange(min, max) {
+    if (state.get('view') !== 'spectrogram') return;
+    const patch = zoomedRange(min, max, 'spectrogram');
+    if (patch) zoomRangeSettled(patch);
   },
   onReset() {
-    if (state.get('view') !== 'spectrum') return;
-    if (rangeBeforeZoom) zoomRange(rangeBeforeZoom);
-    else zoomRange({ freqAuto: true });
-    rangeBeforeZoom = null;
+    if (state.get('view') === 'scope') return;
+    clearTimeout(sgZoomTimer);
+    zoomRange(chosenRange);
   },
   onHover(x, y) {
     hover = x === null ? null : { x, y };
@@ -202,8 +217,10 @@ const interaction = new PlotInteraction(canvas, views.spectrum.axes, {
   },
 });
 
-state.on(['freqAuto', 'freqMin', 'freqMax'], () => {
-  if (!zoomingRange) rangeBeforeZoom = null;
+// anything that is not a zoom gesture — the Range control, mostly — is the
+// user choosing a range, and that is what a reset returns to
+state.on(rangeKeys, () => {
+  if (!zoomingRange) chosenRange = currentRange();
 });
 
 // PlotInteraction leaves vertical drags to the page, for a plot that sits in
@@ -428,11 +445,17 @@ const ui = initUI(state, engine, {
   },
 });
 
+function bindInteraction() {
+  interaction.axes = activeView().axes;
+  // frequency runs across the spectrum and up the spectrogram
+  interaction.zoomAxis = state.get('view') === 'spectrogram' ? 'y' : 'x';
+}
+
 state.on('view', () => {
   hover = null;
-  interaction.axes = activeView().axes;
+  bindInteraction();
 });
-interaction.axes = activeView().axes;
+bindInteraction();
 
 state.on('monitorLevel', (v) => {
   if (started && state.get('source').startsWith('demo-')) engine.setMonitor(v);

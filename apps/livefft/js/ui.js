@@ -377,7 +377,7 @@ export function initUI(state, engine, callbacks) {
     };
 
     addSection('Plot', [
-      ['Zoom', 'Drag across the spectrum to zoom the frequency axis (pinch on touch). Double-click or double-tap to undo the zoom and return to the Range setting; do it again for the full spectrum.'],
+      ['Zoom', 'Drag across the spectrum to zoom the frequency axis, or pinch it — on the spectrogram, pinch up the frequency axis (scroll wheel on both). Double-click or double-tap comes back to the Range setting.'],
       ['Readout', 'Move the pointer (or touch) over the plot for a frequency and level readout at the crosshair.'],
       ['Run / pause', 'The Start button, or the space bar. Pausing freezes the display for discussion. After the app has been in the background, Resume rebuilds the audio input if the phone shut it down.'],
       ['Peak hold', 'Hold (bottom right of the spectrum) keeps the maximum of the displayed trace since the last Reset, shown as the amber trace. With averaging on it holds the averaged level; switch averaging off to catch short transients.'],

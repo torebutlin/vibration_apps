@@ -21,6 +21,7 @@ export class PlotInteraction {
    * @param {import('./axes.js').Axes} axes
    * @param {object} cb callbacks:
    *   onXRange(min, max)  — user changed the x range
+   *   onYRange(min, max)  — ditto, when zoomAxis is 'y'
    *   onReset()           — user requested reset (double-click/tap)
    *   onHover(px, py|null)— pointer moved (CSS px, relative to canvas), null = left
    *   onTap(px, py)       — pointer released without dragging or pinching.
@@ -37,6 +38,11 @@ export class PlotInteraction {
     this.lastTap = -Infinity;  // no tap yet (0 would read as "just now" at load)
     this.tapTimer = null;      // pending onTap, held for the double-tap window
     this.lastReset = -Infinity;
+    // Which axis pinch and wheel zoom. 'x' for a plot whose interesting
+    // axis runs across (the spectrum); 'y' where it runs up — the
+    // spectrogram, with time across and frequency up. The rubber band is
+    // an x gesture, so it is offered only in 'x'.
+    this.zoomAxis = 'x';
 
     el.style.touchAction = 'pan-y'; // keep vertical page scroll on mobile
     el.addEventListener('pointerdown', (e) => this.#down(e));
@@ -62,6 +68,32 @@ export class PlotInteraction {
     return { x: e.clientX - r.left, y: e.clientY - r.top };
   }
 
+  /**
+   * The axis a zoom gesture acts on, with the transforms it needs: where a
+   * pointer sits along it, the 0..1 fraction of the plot that is (upwards
+   * for y), and the data value there.
+   */
+  #zoomed() {
+    const vertical = this.zoomAxis === 'y';
+    const r = this.axes.rect;
+    return {
+      vertical,
+      axis: vertical ? this.axes.y : this.axes.x,
+      origin: vertical ? r.y : r.x,
+      length: vertical ? r.h : r.w,
+      pos: (p) => (vertical ? p.y : p.x),
+      t: (px) => (vertical ? 1 - (px - r.y) / r.h : (px - r.x) / r.w),
+      toData: (px) => (vertical ? this.axes.pxToY(px) : this.axes.pxToX(px)),
+      set: (min, max, log) => (vertical ? this.axes.setY(min, max, log) : this.axes.setX(min, max, log)),
+      emit: (a, b) => {
+        const min = Math.min(a, b);
+        const max = Math.max(a, b);
+        if (vertical) this.cb.onYRange?.(min, max);
+        else this.cb.onXRange?.(min, max);
+      },
+    };
+  }
+
   #down(e) {
     const p = this.#pos(e);
     try { this.el.setPointerCapture(e.pointerId); } catch { /* synthetic pointer */ }
@@ -72,12 +104,14 @@ export class PlotInteraction {
       // enter pinch mode, cancel rubber band
       this.tapCandidate = false;
       this.drag = null;
+      const z = this.#zoomed();
       const [a, b] = [...this.pointers.values()];
       this.pinch = {
-        x0px: Math.min(a.x, b.x),
-        x1px: Math.max(a.x, b.x),
-        min: this.axes.x.min,
-        max: this.axes.x.max,
+        p0: Math.min(z.pos(a), z.pos(b)),
+        p1: Math.max(z.pos(a), z.pos(b)),
+        min: z.axis.min,
+        max: z.axis.max,
+        log: z.axis.log,
       };
       return;
     }
@@ -93,7 +127,8 @@ export class PlotInteraction {
       this.#reset();
       return;
     }
-    if (this.axes.inRect(p.x, p.y)) {
+    // the rubber band selects a span across the plot: an x gesture
+    if (this.zoomAxis === 'x' && this.axes.inRect(p.x, p.y)) {
       this.drag = { x0: p.x, x1: p.x, moved: false };
     }
   }
@@ -103,24 +138,24 @@ export class PlotInteraction {
     if (this.pointers.has(e.pointerId)) this.pointers.set(e.pointerId, p);
 
     if (this.pinch && this.pointers.size === 2) {
+      const z = this.#zoomed();
       const [a, b] = [...this.pointers.values()];
-      const n0 = Math.min(a.x, b.x);
-      const n1 = Math.max(a.x, b.x);
-      if (n1 - n0 > 20 && this.pinch.x1px - this.pinch.x0px > 20) {
+      const n0 = Math.min(z.pos(a), z.pos(b));
+      const n1 = Math.max(z.pos(a), z.pos(b));
+      if (n1 - n0 > 20 && this.pinch.p1 - this.pinch.p0 > 20) {
         // map so the two anchor points stay under the fingers
-        const r = this.axes.rect;
-        const ax = this.axes;
+        const saved = { ...z.axis };
         // original data coords of the pinch anchors (in a temp axes view)
-        const saved = { ...ax.x };
-        ax.setX(this.pinch.min, this.pinch.max, saved.log);
-        const d0 = ax.pxToX(this.pinch.x0px);
-        const d1 = ax.pxToX(this.pinch.x1px);
-        // find new range so d0 sits at n0 and d1 at n1
-        const t0 = (n0 - r.x) / r.w;
-        const t1 = (n1 - r.x) / r.w;
+        z.set(this.pinch.min, this.pinch.max, this.pinch.log);
+        const d0 = z.toData(this.pinch.p0);
+        const d1 = z.toData(this.pinch.p1);
+        z.set(saved.min, saved.max, saved.log); // restore; app applies via callback
+        // find the new range that puts d0 at n0 and d1 at n1
+        const t0 = z.t(n0);
+        const t1 = z.t(n1);
         let min;
         let max;
-        if (saved.log) {
+        if (this.pinch.log) {
           const L0 = Math.log(d0);
           const L1 = Math.log(d1);
           const a2 = (L1 - L0) / (t1 - t0);
@@ -133,8 +168,7 @@ export class PlotInteraction {
           min = b2;
           max = a2 + b2;
         }
-        ax.setX(saved.min, saved.max, saved.log); // restore; app applies via callback
-        this.cb.onXRange?.(min, max);
+        z.emit(min, max);
       }
       return;
     }
@@ -191,8 +225,9 @@ export class PlotInteraction {
     if (!this.axes.inRect(...Object.values(this.#pos(e)))) return;
     e.preventDefault();
     const p = this.#pos(e);
+    const z = this.#zoomed();
     const r = this.axes.rect;
-    if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+    if (!z.vertical && Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
       // horizontal pan
       const shift = e.deltaX / r.w;
       const t0 = shift;
@@ -201,14 +236,12 @@ export class PlotInteraction {
       const max = this.axes.pxToX(r.x + t1 * r.w);
       this.cb.onXRange?.(min, max);
     } else {
-      // zoom around cursor
+      // zoom around the cursor
       const f = Math.exp(e.deltaY * 0.002);
-      const cx = p.x;
-      const newLeft = cx - (cx - r.x) * f;
-      const newRight = cx + (r.x + r.w - cx) * f;
-      const min = this.axes.pxToX(newLeft);
-      const max = this.axes.pxToX(newRight);
-      this.cb.onXRange?.(min, max);
+      const c = z.pos(p);
+      const lo = c - (c - z.origin) * f;
+      const hi = c + (z.origin + z.length - c) * f;
+      z.emit(z.toData(lo), z.toData(hi));
     }
   }
 
