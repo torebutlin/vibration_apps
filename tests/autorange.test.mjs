@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { levelStats, AxisLimit } from '../shared/js/plot/autorange.js';
+import { levelStats, axisCeiling, AxisLimit } from '../shared/js/plot/autorange.js';
 
 /** One trace segment: `values` starting at bin `startBin`, `binHz` apart. */
 function seg(values, { binHz = 1, startBin = 0 } = {}) {
@@ -72,6 +72,27 @@ test('levelStats: a caller-supplied histogram is reused, not grown', () => {
   const a = levelStats([toneOnFloor()], 0, 1000, { hist });
   const b = levelStats([toneOnFloor()], 0, 1000, { hist });
   assert.deepEqual(a, b);
+});
+
+// ---------- axisCeiling ----------
+
+test('axisCeiling: headroom above the peak, quantized up to the grid', () => {
+  assert.equal(axisCeiling(-42), -35);   // -42 + 6 = -36, up to the 5 dB grid
+  assert.equal(axisCeiling(-40), -30);   // exactly on a grid line: still clear
+  assert.equal(axisCeiling(-44, { headroom: 12 }), -30); // big labels
+});
+
+test('axisCeiling: a quiet signal brings the ceiling down with it', () => {
+  // the whole point: nothing pins the top of the axis to a fixed level
+  assert.equal(axisCeiling(-62), -55);
+  assert.equal(axisCeiling(-95), -85);
+  assert.equal(axisCeiling(-118), -110);
+});
+
+test('axisCeiling: full scale and meaningless levels bound it', () => {
+  assert.equal(axisCeiling(40), 20, 'a clipping source stops at the top');
+  assert.equal(axisCeiling(-300), -140, 'digital silence does not drag it away');
+  assert.equal(axisCeiling(-90, { min: -60 }), -60, 'a caller can raise the floor');
 });
 
 // ---------- AxisLimit ----------

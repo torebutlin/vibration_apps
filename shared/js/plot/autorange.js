@@ -64,6 +64,25 @@ export function levelStats(segments, xMin, xMax, { tail = 0.02, depth = 160, flo
 }
 
 /**
+ * Where the top of an auto-scaled dB axis should sit for a given peak:
+ * `headroom` above it, quantized up to the grid the labels use, and kept
+ * inside [min, max].
+ *
+ * The ceiling follows the peak all the way down — a quiet signal is worth
+ * filling the plot with just as much as a loud one — so `min` is only there
+ * to stop an axis chasing digital silence to −300 dB, where the numbers
+ * have stopped meaning anything.
+ *
+ * @param {number} peak highest level of the traces the axis is fitted to, dB
+ * @param {object} [opts] { headroom, grid, min, max }, all dB
+ * @returns {number}
+ */
+export function axisCeiling(peak, { headroom = 6, grid = 5, min = -140, max = 20 } = {}) {
+  const quantized = Math.ceil((peak + headroom) / grid) * grid;
+  return Math.min(Math.max(quantized, min), max);
+}
+
+/**
  * One end of an auto-scaled axis, with attack / hold / release:
  *  - never clip: move straight to `required` when it lies outside the limit;
  *  - hold while the data stays within `holdBand` of the limit;

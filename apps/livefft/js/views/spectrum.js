@@ -5,7 +5,7 @@ import { SpectrumProcessor } from '../../../../shared/js/dsp/spectrum.js';
 import { MultiResSpectrum } from '../../../../shared/js/dsp/multires.js';
 import { findPeaks } from '../../../../shared/js/dsp/peaks.js';
 import { Axes, fmtHz, plotTheme, plotLayout } from '../../../../shared/js/plot/axes.js';
-import { AxisLimit, levelStats } from '../../../../shared/js/plot/autorange.js';
+import { AxisLimit, axisCeiling, levelStats } from '../../../../shared/js/plot/autorange.js';
 import { FrameHopper } from '../../../../shared/js/dsp/hop.js';
 import { freqRange } from '../state.js';
 
@@ -31,6 +31,8 @@ const AUTO_SPAN_MAX = 120;     // dB: nor a wider one
 const AUTO_FLOOR_TAIL = 0.02;  // fraction of bins allowed below the floor
 const AUTO_FLOOR_MARGIN = 8;   // dB of clearance under the floor level
 const LEVEL_DEPTH = 160;       // dB below the peak the floor can be found
+const AUTO_TOP_MAX = 20;       // dB: the ceiling stops above full scale
+const AUTO_TOP_MIN = -140;     // dB: and below any converter's noise floor
 
 function hexToRgba(hex, alpha) {
   const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
@@ -51,10 +53,11 @@ export class SpectrumView {
     this.instDisplay = null;
     this.persistCanvas = null;
     this.persistKey = null;     // axis geometry the phosphor was drawn for
-    // auto range: one limit per end of the y axis (see AxisLimit)
-    this.autoTop = new AxisLimit(-20, +1);       // dB ceiling
-    // the floor gives ground back after a smaller change than the ceiling:
-    // one step of the 5 dB grid it is quantized to, so the plot stays full
+    // Auto range: one limit per end of the y axis (see AxisLimit). Both
+    // give ground back once the data has left a gap wider than the grid
+    // they are quantized to — one 5 dB step at the floor, two at the
+    // ceiling, where a peak wanders more than the body of the trace does.
+    this.autoTop = new AxisLimit(-20, +1, { holdBand: 10 });
     this.autoBottom = new AxisLimit(-130, -1, { holdBand: 5 });
     this.autoMaxLin = new AxisLimit(1, +1);      // linear ceiling
     this.levelHist = new Int32Array(LEVEL_DEPTH); // scratch for levelStats
@@ -241,10 +244,13 @@ export class SpectrumView {
       });
       if (dB) {
         // ceiling: headroom for the peak labels (more in big label mode),
-        // quantized to 5 dB steps
+        // quantized to 5 dB steps. It follows the peak wherever it goes, so
+        // a quiet source fills the plot rather than hanging under a fixed
+        // top; only full scale and the point where levels stop meaning
+        // anything bound it.
         const headroom = s.get('labelSize') === 'big' ? 12 : 6;
-        const peak = stats ? stats.peak : -160;
-        const top = Math.max(Math.min(Math.ceil((peak + headroom) / 5) * 5, 20), -60);
+        const peak = stats ? stats.peak : AUTO_TOP_MIN;
+        const top = axisCeiling(peak, { headroom, min: AUTO_TOP_MIN, max: AUTO_TOP_MAX });
         yMax = this.autoTop.track(top, step);
         // floor: just under the body of the bold traces, so the plot is
         // filled by the measurement rather than by empty decades below it
