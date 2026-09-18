@@ -54,6 +54,48 @@ function applyLayout() {
   layout.padBottom = layout.compact ? safeInset('--sab') : 0;
 }
 
+// The app is one screenful: it fills the viewport and never scrolls. CSS
+// viewport units are not enough to say that on a phone — after a rotation a
+// browser can leave 100dvh resolving to a viewport taller than the one it
+// is actually showing, and the page is then scrollable by the difference. A
+// rotation back to portrait would land it scrolled to the bottom: blank
+// ground under the plot, and the full-screen button off the top of the
+// screen with no way to leave full view. So the height comes from the
+// viewport the browser reports, and any scroll offset is undone.
+function applyViewportSize() {
+  const vv = window.visualViewport;
+  // while the page is pinch-zoomed vv.height is the zoomed-in slice; the
+  // scale factor takes it back to the layout height the app should fill
+  const h = vv ? vv.height * vv.scale : window.innerHeight;
+  const px = `${Math.round(h)}px`;
+  const root = document.documentElement;
+  if (h > 0 && px !== root.style.getPropertyValue('--app-h')) root.style.setProperty('--app-h', px);
+  if (window.scrollX !== 0 || window.scrollY !== 0) window.scrollTo(0, 0);
+}
+
+function settleViewport() {
+  applyViewportSize();
+  applyLayout();
+  resizeCanvas();
+}
+
+// Phones can change the viewport without an event the app can trust: a
+// rotation the media query reports before the layout has caught up, browser
+// chrome that slides away, a scroll position nobody asked for. Twice a
+// second, check that the app still covers exactly what is on screen, and
+// put it back when it does not.
+const appEl = document.getElementById('app');
+let lastViewportCheck = 0;
+
+function checkViewport(now) {
+  if (now - lastViewportCheck < 500) return;
+  lastViewportCheck = now;
+  const vv = window.visualViewport;
+  const want = Math.round(vv ? vv.height * vv.scale : window.innerHeight);
+  const have = Math.round(appEl.getBoundingClientRect().height);
+  if (window.scrollX !== 0 || window.scrollY !== 0 || Math.abs(have - want) > 1) settleViewport();
+}
+
 // Rotating the device changes which safe-area insets are non-zero, but the
 // media-query event can arrive before the browser has finished laying the
 // page out, so env() still reads the old orientation. Re-apply as the
@@ -65,23 +107,24 @@ const ROTATE_GRACE_MS = 1500;
 
 function onRotate() {
   lastRotation = performance.now();
-  applyLayout();
-  for (const ms of [50, 250, 600]) {
-    setTimeout(() => {
-      applyLayout();
-      resizeCanvas();
-    }, ms);
-  }
+  settleViewport();
+  // the rotation animation and the browser chrome that follows it can take
+  // most of a second to come to rest
+  for (const ms of [50, 250, 600, 1000]) setTimeout(settleViewport, ms);
 }
 
-mqNarrow.addEventListener('change', applyLayout);
+mqNarrow.addEventListener('change', settleViewport);
 mqPortrait.addEventListener('change', onRotate);
 window.addEventListener('orientationchange', onRotate);
 screen.orientation?.addEventListener?.('change', onRotate);
 // entering or leaving full screen, and the phone browser's own chrome
 // appearing, move the insets too
-window.addEventListener('resize', () => applyLayout());
-window.visualViewport?.addEventListener('resize', () => applyLayout());
+window.addEventListener('resize', settleViewport);
+window.visualViewport?.addEventListener('resize', settleViewport);
+// nothing in the app scrolls the page; if the browser did, put it back
+window.addEventListener('scroll', applyViewportSize, { passive: true });
+window.visualViewport?.addEventListener('scroll', applyViewportSize);
+applyViewportSize();
 applyLayout();
 
 // ---------- canvas sizing ----------
@@ -90,10 +133,17 @@ function resizeCanvas() {
   const wrap = document.getElementById('plot-wrap');
   const rect = wrap.getBoundingClientRect();
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  cssW = Math.round(rect.width);
-  cssH = Math.round(rect.height);
-  canvas.width = Math.round(cssW * dpr);
-  canvas.height = Math.round(cssH * dpr);
+  const w = Math.round(rect.width);
+  const h = Math.round(rect.height);
+  const bw = Math.round(w * dpr);
+  const bh = Math.round(h * dpr);
+  // setting width or height clears the canvas, so only touch them on a real
+  // change: this is called from every viewport event and settle timer
+  if (w === cssW && h === cssH && canvas.width === bw && canvas.height === bh) return;
+  cssW = w;
+  cssH = h;
+  canvas.width = bw;
+  canvas.height = bh;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 
@@ -128,6 +178,11 @@ const interaction = new PlotInteraction(canvas, views.spectrum.axes, {
     if (layout.compact && fullview) setFullview(false);
   },
 });
+
+// PlotInteraction leaves vertical drags to the page, for the demo pages that
+// scroll. This one does not: a swipe over the plot must not drag the app
+// out of place, so the canvas takes every touch.
+canvas.style.touchAction = 'none';
 
 // ---------- engine start / pause ----------
 
@@ -272,6 +327,9 @@ function setFullview(on, native = true) {
   document.body.classList.toggle('fullview', on);
   applyLayout(); // phones: the plot reclaims the pill row
   syncFullButton();
+  // the viewport changes size as the browser's own chrome goes and returns
+  settleViewport();
+  for (const ms of [50, 250, 600]) setTimeout(settleViewport, ms);
   if (!native) return;
   if (on) {
     fullscreenApi.request(document.documentElement).catch(() => { /* iOS: CSS-only */ });
@@ -412,6 +470,7 @@ function frame(now) {
   requestAnimationFrame(frame);
   const dt = Math.min((now - lastFrame) / 1000, 0.2);
   lastFrame = now;
+  checkViewport(now);
   if (cssW < 10 || cssH < 10) return;
 
   const view = activeView();

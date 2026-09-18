@@ -4,7 +4,7 @@
    over it as pills and the settings rail becomes a bottom sheet. Only the
    canvas frame boxes anything. */
 
-html, body { height: 100%; overflow: hidden; }
+html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
 
 /* safe-area insets readable from JS (main.js reserves plot margins with them) */
 :root {
@@ -12,14 +12,24 @@ html, body { height: 100%; overflow: hidden; }
   --sab: env(safe-area-inset-bottom, 0px);
 }
 
+/* The app is exactly one screenful and never scrolls. Its height comes from
+   the viewport the browser reports (main.js keeps --app-h up to date);
+   100dvh is only the fallback, because a phone can leave it resolving to a
+   viewport taller than the one actually visible after a rotation. Fixed
+   rather than in flow, so a stray scroll cannot carry the controls off the
+   top of the screen. */
 #app {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: var(--app-h, 100dvh);
   display: grid;
   grid-template-areas:
     'topbar topbar'
     'stage panel';
   grid-template-rows: 48px 1fr;
   grid-template-columns: 1fr 272px;
-  height: 100dvh;
 }
 
 /* ---------- Header ---------- */
@@ -346,7 +356,7 @@ body.fullview #app {
 
 #help-card {
   width: min(34rem, 100%);
-  max-height: min(82dvh, 44rem);
+  max-height: min(calc(var(--app-h, 100dvh) * 0.82), 44rem);
   display: flex;
   flex-direction: column;
   box-shadow: 0 24px 80px var(--overlay-shadow);
@@ -429,7 +439,7 @@ body.fullview #app {
    ===================================================================== */
 
 @media (max-width: 860px) {
-  #app { display: block; height: 100dvh; position: relative; }
+  #app { display: block; }
 
   #stage {
     position: absolute;
@@ -533,7 +543,7 @@ body.fullview #app {
     right: 0;
     bottom: 0;
     top: auto;
-    height: min(60dvh, 560px);
+    height: min(calc(var(--app-h, 100dvh) * 0.6), 560px);
     background: var(--sheet);
     border: none;
     border-radius: 16px 16px 0 0;
