@@ -9,11 +9,19 @@
 // lines in the display); the echo lines carry each stage past its boundary
 // so the eye can follow the level across the jump.
 //
-// Each stage has its own window correction, averaging state and peak hold;
-// the longer stages are recomputed at a reduced cadence to bound CPU cost.
+// Each stage has its own window correction, averaging state and peak hold.
 // Averaging modes mirror SpectrumProcessor (off / exponential / linear-N-
-// then-freeze); in linear mode the longest stage finishes last because it
-// updates least often.
+// then-freeze).
+//
+// How often a stage is recomputed is a display question, not an averaging
+// one. A stage could wait for half its window of new samples — 50% overlap,
+// the cheapest frame that is worth averaging — but that leaves the bottom
+// region redrawing 4^k times more slowly than the top, which reads as a
+// stutter rather than as resolution. So a stage is recomputed as often as
+// the device can afford, up to once per frame, and the averaging is told
+// how much new data the frame carried rather than assuming one frame's
+// worth: the extra recomputes overlap more, which costs arithmetic, not
+// accuracy. "16 averages" therefore means the same thing at any cadence.
 
 import { rfftMagSq } from './fft.js';
 import { getWindow } from './windows.js';
@@ -22,6 +30,38 @@ import { getWindow } from './windows.js';
 // #stageTau: without a cap the lowest region would average over 8 s at the
 // default 0.5 s setting, which is longer than a demo holds still.
 const MAX_STAGE_TAU = 4;
+
+// Share of real time the three stages may spend between them. A 16x FFT
+// every frame is affordable on a laptop and not on a phone, so the cadence
+// follows what the stages measurably cost here.
+const CADENCE_BUDGET = 0.35;
+
+/**
+ * How often each stage may be recomputed, in frames.
+ *
+ * Every stage would ideally run every frame. Where that does not fit the
+ * budget a stage falls back through powers of two, and never past the
+ * `max` it is given — the cadence the display had before any of this, so a
+ * slow device is left no worse off than it was.
+ *
+ * @param {number[]} costMs measured cost of one recompute per stage
+ * @param {number} hopSeconds real time each frame covers
+ * @param {number[]} max coarsest cadence allowed per stage
+ * @param {number} budget share of real time for all stages together
+ * @returns {number[]} cadence per stage
+ */
+export function chooseCadences(costMs, hopSeconds, max, budget = CADENCE_BUDGET) {
+  const out = [];
+  let used = 0;
+  for (let k = 0; k < costMs.length; k++) {
+    const share = (cadence) => costMs[k] / 1000 / (hopSeconds * cadence);
+    let cadence = 1;
+    while (cadence < max[k] && used + share(cadence) > budget) cadence *= 2;
+    out.push(cadence);
+    used += share(cadence);
+  }
+  return out;
+}
 
 export class MultiResSpectrum {
   /**
@@ -35,6 +75,10 @@ export class MultiResSpectrum {
     this.expTimeConst = 0.5;
     this.avgMode = 'exponential';
     this.linearTarget = 16;
+    // 0 pins every stage at its coarsest cadence (tests, and for measuring
+    // against the display this replaced)
+    this.cadenceBudget = CADENCE_BUDGET;
+    this.hopSeconds = 0;
     this.configure(baseSize, windowName);
   }
 
@@ -51,7 +95,13 @@ export class MultiResSpectrum {
         coherentGain,
         noiseGain,
         nBins,
-        cadence: 2 ** k,       // recompute every 2^k frames
+        // recompute every `cadence` frames; 2^k is where it starts and the
+        // coarsest it will go (see chooseCadences)
+        cadence: 2 ** k,
+        maxCadence: 2 ** k,
+        cost: 0,               // ms per recompute, smoothed
+        pendingWeight: 0,      // base frames of new data since it last ran
+        pendingDt: 0,          // and how long ago that was
         frame: 0,
         windowed: new Float64Array(size),
         power: new Float64Array(nBins),
@@ -78,6 +128,8 @@ export class MultiResSpectrum {
     for (const s of this.stages) {
       s.avgPower.fill(0);
       s.avgCount = 0;
+      s.pendingWeight = 0;
+      s.pendingDt = 0;
     }
   }
 
@@ -117,15 +169,22 @@ export class MultiResSpectrum {
    * @param {Float32Array} samples newest samples, length >= maxSize
    * @param {number} dt seconds since last call
    * @param {number} weight independent-frame weight of this call for the
-   *   base stage (1 = hop of half the base window). Stage k runs every
-   *   `cadence` calls on a 4^k longer window, so one compute of it is
-   *   weight * cadence / 4^k independent frames (2^k for cadence 2^k).
+   *   base stage (1 = hop of half the base window). Each stage banks these
+   *   until it next runs: the data it then sees is worth that much divided
+   *   by 4^k, its window being that much longer, however often it ran.
    */
   process(samples, dt, weight = 1) {
+    // Real time each call covers, from the audio rather than the clock: a
+    // display that has fallen behind reports a longer dt, which would make
+    // the work look cheaper the slower it got.
+    if (weight > 0) this.hopSeconds = (weight * this.baseSize) / (2 * this.sampleRate);
     for (let k = 0; k < this.stages.length; k++) {
       const s = this.stages[k];
       s.frame++;
+      s.pendingWeight += weight;
+      s.pendingDt += dt;
       if (s.frame % s.cadence !== 0 && s.avgCount > 0) continue;
+      const startedAt = performance.now();
       const linearDone = this.avgMode === 'linear' && s.avgCount >= this.linearTarget - 1e-9;
       // instantaneous spectrum always (drives the live ghost trace);
       // only the average freezes when a linear measurement completes
@@ -142,8 +201,8 @@ export class MultiResSpectrum {
             break;
           case 'linear': {
             const c = s.avgCount;
-            // this compute covers `cadence` hops of a 4^k longer window
-            const w = (weight * s.cadence) / 4 ** k;
+            // the new data since this stage last ran, in its own frames
+            const w = s.pendingWeight / 4 ** k;
             for (let b = 0; b < nBins; b++) avgPower[b] = (avgPower[b] * c + power[b] * w) / (c + w);
             s.avgCount = c + w;
             break;
@@ -151,16 +210,38 @@ export class MultiResSpectrum {
           default: {
             const alpha = s.avgCount === 0
               ? 1
-              : 1 - Math.exp((-dt * s.cadence) / Math.max(this.#stageTau(k), 1e-3));
+              : 1 - Math.exp(-s.pendingDt / Math.max(this.#stageTau(k), 1e-3));
             for (let b = 0; b < nBins; b++) avgPower[b] += alpha * (power[b] - avgPower[b]);
             s.avgCount++;
           }
         }
       }
+      s.pendingWeight = 0;
+      s.pendingDt = 0;
       const { avgPower, peakPower, nBins } = s;
       for (let b = 0; b < nBins; b++) if (avgPower[b] > peakPower[b]) peakPower[b] = avgPower[b];
+      const took = performance.now() - startedAt;
+      s.cost = s.cost ? s.cost + 0.25 * (took - s.cost) : took;
     }
     this.peakValid = true;
+    this.#chooseCadences();
+  }
+
+  /** Re-fit the cadences to what the stages are measurably costing. */
+  #chooseCadences() {
+    if (!this.cadenceBudget) {
+      for (const s of this.stages) s.cadence = s.maxCadence;
+      return;
+    }
+    if (!this.hopSeconds) return;
+    if (this.stages.some((s) => !s.cost)) return; // not all measured yet
+    const cadences = chooseCadences(
+      this.stages.map((s) => s.cost),
+      this.hopSeconds,
+      this.stages.map((s) => s.maxCadence),
+      this.cadenceBudget
+    );
+    for (let k = 0; k < this.stages.length; k++) this.stages[k].cadence = cadences[k];
   }
 
   #sourceArray(s, source) {

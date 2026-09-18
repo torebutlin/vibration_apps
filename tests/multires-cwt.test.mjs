@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MultiResSpectrum } from '../shared/js/dsp/multires.js';
+import { MultiResSpectrum, chooseCadences } from '../shared/js/dsp/multires.js';
 
 function makeNoise(n, sigma, seedStart = 42) {
   let a = seedStart | 0;
@@ -137,22 +137,62 @@ test('multires extensions continue each stage past its boundary', () => {
 
 test('multires linear averaging weights slower stages by their longer windows', () => {
   const fs = 48000;
+  // the same audio through a display that recomputes every stage every
+  // frame and one that recomputes at the coarsest cadence: an average
+  // counts the data a stage has seen, so both land in the same place
+  const make = (budget) => {
+    const mr = new MultiResSpectrum({ baseSize: 1024, windowName: 'hann', sampleRate: fs });
+    mr.cadenceBudget = budget;                       // Infinity: every frame; 0: 2^k
+    mr.setAveraging('linear', { linearTarget: 1000 }); // no freeze inside the test
+    return mr;
+  };
+  const fast = make(Infinity);
+  const slow = make(0);
+  const n = fast.maxSize;
+  for (let f = 0; f < 16; f++) {
+    const frame = makeNoise(n, 0.1, 3 + f * 31);
+    fast.process(frame, 0.05, 1);
+    slow.process(frame, 0.05, 1);
+  }
+  assert.deepEqual(fast.stages.map((s) => s.cadence), [1, 1, 1]);
+  assert.deepEqual(slow.stages.map((s) => s.cadence), [1, 2, 4]);
+  // 16 hops of the base window is 16 frames of stage 0, 4 of stage 1 and
+  // one of stage 2, whose window is 16x longer
+  for (const mr of [fast, slow]) {
+    assert.deepEqual(mr.stages.map((s) => s.avgCount), [16, 4, 1]);
+  }
+});
+
+test('multires linear averaging freezes on data seen, at any cadence', () => {
+  const fs = 48000;
   const mr = new MultiResSpectrum({ baseSize: 1024, windowName: 'hann', sampleRate: fs });
+  mr.cadenceBudget = Infinity;
   mr.setAveraging('linear', { linearTarget: 2 });
   const n = mr.maxSize;
-  // weight 1 = the base stage hops by half its window; stage k then hops by
-  // 2^k * hop but has a 4^k longer window, so its weight is 1 / 2^k
   for (let f = 0; f < 16; f++) mr.process(makeNoise(n, 0.1, 3 + f * 31), 0.05, 1);
-  // every stage also computes on the very first frame, then on its cadence:
-  // stage 0: 16 frames x 1          = 16    (done)
-  // stage 1: (1 + 8) frames x 0.5   = 4.5   (done)
-  // stage 2: (1 + 4) frames x 0.25  = 1.25  (not done)
-  assert.equal(mr.stages[2].avgCount, 1.25);
+  assert.equal(mr.stages[2].avgCount, 1, 'the slowest stage is halfway there');
   assert.ok(!mr.linearProgress.done);
   for (let f = 16; f < 32; f++) mr.process(makeNoise(n, 0.1, 3 + f * 31), 0.05, 1);
-  // the stage freezes as soon as it reaches the target (8 computes x 0.25)
-  assert.equal(mr.stages[2].avgCount, 2);
+  assert.equal(mr.stages[2].avgCount, 2, 'and stops exactly on the target');
   assert.ok(mr.linearProgress.done);
+});
+
+test('chooseCadences: every stage every frame when it fits', () => {
+  // 21 ms frames, a millisecond of work between them
+  assert.deepEqual(chooseCadences([0.2, 0.3, 0.5], 0.0213, [1, 2, 4]), [1, 1, 1]);
+});
+
+test('chooseCadences: the expensive stage backs off, and only it', () => {
+  // 8 ms of every 21 is 38% on its own, over the 35% budget; every other
+  // frame is 19%, which fits beside the 5% the first two stages take
+  assert.deepEqual(chooseCadences([0.2, 0.8, 8], 0.0213, [1, 2, 4]), [1, 1, 2]);
+  // twice as expensive again and it drops to every fourth frame
+  assert.deepEqual(chooseCadences([0.2, 0.8, 16], 0.0213, [1, 2, 4]), [1, 1, 4]);
+});
+
+test('chooseCadences: never coarser than the cadence it is given', () => {
+  // a device an order of magnitude too slow: each stage stops at its max
+  assert.deepEqual(chooseCadences([20, 40, 80], 0.0213, [1, 2, 4]), [1, 2, 4]);
 });
 
 test('multi-res averaging leaves the same noise in every region', () => {
