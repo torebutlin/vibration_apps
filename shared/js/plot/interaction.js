@@ -4,6 +4,17 @@
 // Works in pixel space via the Axes transforms, so it is agnostic of
 // linear/log scaling.
 
+// A second tap this soon after the first is a double tap, not two taps.
+// Platform double-click times run to about half a second; a shade under
+// that catches a deliberate double tap without making single taps wait
+// noticeably for it.
+const DOUBLE_TAP_MS = 400;
+
+// A touch double tap also synthesizes a dblclick, a frame or so behind it.
+// A reset ignores one that soon after it has already reset: the gesture was
+// the same one, and a reset with stages to it would skip one.
+const RESET_ECHO_MS = 700;
+
 export class PlotInteraction {
   /**
    * @param {HTMLElement} el element receiving pointer events (the canvas)
@@ -12,7 +23,9 @@ export class PlotInteraction {
    *   onXRange(min, max)  — user changed the x range
    *   onReset()           — user requested reset (double-click/tap)
    *   onHover(px, py|null)— pointer moved (CSS px, relative to canvas), null = left
-   *   onTap(px, py)       — pointer released without dragging or pinching
+   *   onTap(px, py)       — pointer released without dragging or pinching.
+   *                         On touch it arrives only once the double-tap
+   *                         window has passed, so a reset never fires it too.
    */
   constructor(el, axes, cb = {}) {
     this.el = el;
@@ -21,7 +34,9 @@ export class PlotInteraction {
     this.drag = null;          // {x0, x1} rubber band, CSS px
     this.pointers = new Map(); // pointerId -> {x, y}
     this.pinch = null;         // {x0px, x1px, min, max}
-    this.lastTap = 0;
+    this.lastTap = -Infinity;  // no tap yet (0 would read as "just now" at load)
+    this.tapTimer = null;      // pending onTap, held for the double-tap window
+    this.lastReset = -Infinity;
 
     el.style.touchAction = 'pan-y'; // keep vertical page scroll on mobile
     el.addEventListener('pointerdown', (e) => this.#down(e));
@@ -32,8 +47,14 @@ export class PlotInteraction {
     el.addEventListener('wheel', (e) => this.#wheel(e), { passive: false });
     el.addEventListener('dblclick', (e) => {
       e.preventDefault();
-      this.cb.onReset?.();
+      if (performance.now() - this.lastReset < RESET_ECHO_MS) return;
+      this.#reset();
     });
+  }
+
+  #reset() {
+    this.lastReset = performance.now();
+    this.cb.onReset?.();
   }
 
   #pos(e) {
@@ -61,15 +82,16 @@ export class PlotInteraction {
       return;
     }
 
-    if (e.pointerType === 'touch') {
-      // double-tap reset
-      const now = performance.now();
-      if (now - this.lastTap < 320) {
-        this.lastTap = 0;
-        this.cb.onReset?.();
-        return;
-      }
-      this.lastTap = now;
+    // Double-tap reset: a finger down soon after a tap ended. Only a tap
+    // arms this (see #up), so a finger that comes back down after a drag or
+    // a pinch does not undo the zoom it has just made. The first tap is
+    // still pending, so drop it: the gesture is a reset, not a tap repeated.
+    if (e.pointerType === 'touch' && performance.now() - this.lastTap < DOUBLE_TAP_MS) {
+      this.lastTap = -Infinity;    // a third tap starts over
+      this.tapCandidate = false;   // nor is the second half a tap of its own
+      this.#cancelPendingTap();
+      this.#reset();
+      return;
     }
     if (this.axes.inRect(p.x, p.y)) {
       this.drag = { x0: p.x, x1: p.x, moved: false };
@@ -143,8 +165,26 @@ export class PlotInteraction {
     }
     if (tapped) {
       const p = this.#pos(e);
-      this.cb.onTap?.(p.x, p.y);
+      if (e.pointerType === 'touch') {
+        // a tap, and only a tap, opens the double-tap window; until it
+        // closes the tap is held back, so a reset does not also do whatever
+        // a single tap does (in Live FFT, leave the full-screen view)
+        this.lastTap = performance.now();
+        this.#cancelPendingTap();
+        this.tapTimer = setTimeout(() => {
+          this.tapTimer = null;
+          this.cb.onTap?.(p.x, p.y);
+        }, DOUBLE_TAP_MS);
+      } else {
+        this.cb.onTap?.(p.x, p.y);
+      }
     }
+  }
+
+  #cancelPendingTap() {
+    if (this.tapTimer === null) return;
+    clearTimeout(this.tapTimer);
+    this.tapTimer = null;
   }
 
   #wheel(e) {

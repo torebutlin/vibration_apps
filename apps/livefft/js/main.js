@@ -156,6 +156,20 @@ function activeView() {
   return views[state.get('view')];
 }
 
+// Zooming the frequency axis by drag or pinch replaces the Range setting,
+// so the range in force when a zoom started is kept: a reset puts that back
+// rather than jumping to the whole spectrum, which is rarely what someone
+// who set up a 2 kHz view wants. A reset with nothing to undo shows the
+// full range, and any other change to the range drops the memory.
+let rangeBeforeZoom = null;
+let zoomingRange = false;
+
+function zoomRange(patch) {
+  zoomingRange = true;
+  state.update(patch);
+  zoomingRange = false;
+}
+
 const interaction = new PlotInteraction(canvas, views.spectrum.axes, {
   onXRange(min, max) {
     if (state.get('view') !== 'spectrum') return;
@@ -164,11 +178,20 @@ const interaction = new PlotInteraction(canvas, views.spectrum.axes, {
     min = Math.max(log ? 1 : 0, min);
     max = Math.min(fs / 2, max);
     if (max - min < 10) return;
-    state.update({ freqAuto: false, freqMin: Math.round(min * 10) / 10, freqMax: Math.round(max * 10) / 10 });
+    if (!rangeBeforeZoom) {
+      rangeBeforeZoom = {
+        freqAuto: state.get('freqAuto'),
+        freqMin: state.get('freqMin'),
+        freqMax: state.get('freqMax'),
+      };
+    }
+    zoomRange({ freqAuto: false, freqMin: Math.round(min * 10) / 10, freqMax: Math.round(max * 10) / 10 });
   },
   onReset() {
     if (state.get('view') !== 'spectrum') return;
-    state.update({ freqAuto: true });
+    if (rangeBeforeZoom) zoomRange(rangeBeforeZoom);
+    else zoomRange({ freqAuto: true });
+    rangeBeforeZoom = null;
   },
   onHover(x, y) {
     hover = x === null ? null : { x, y };
@@ -179,9 +202,13 @@ const interaction = new PlotInteraction(canvas, views.spectrum.axes, {
   },
 });
 
-// PlotInteraction leaves vertical drags to the page, for the demo pages that
-// scroll. This one does not: a swipe over the plot must not drag the app
-// out of place, so the canvas takes every touch.
+state.on(['freqAuto', 'freqMin', 'freqMax'], () => {
+  if (!zoomingRange) rangeBeforeZoom = null;
+});
+
+// PlotInteraction leaves vertical drags to the page, for a plot that sits in
+// one that scrolls. This app is a single screenful: a swipe over the plot
+// must not drag it out of place, so the canvas takes every touch.
 canvas.style.touchAction = 'none';
 
 // ---------- engine start / pause ----------
