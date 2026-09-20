@@ -6,10 +6,11 @@
 
 html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
 
-/* safe-area insets readable from JS (main.js reserves plot margins with them) */
+/* the top safe-area inset, readable from JS: nothing pads the canvas away
+   from the notch (the pill row floats over it), so the plot has to reserve
+   the room itself. The other three are handled by #stage's padding. */
 :root {
   --sat: env(safe-area-inset-top, 0px);
-  --sab: env(safe-area-inset-bottom, 0px);
 }
 
 /* The app is exactly one screenful and never scrolls. Its height comes from
@@ -155,11 +156,15 @@ body.running #brand-name::after {
 }
 #btn-full:hover, #btn-full:focus-visible { opacity: 1; }
 
-/* peak hold + reset: bottom-right corner of the spectrum */
+/* peak hold + reset: just inside the plot's bottom-right corner. The
+   offsets are measured from the axis frame, not the canvas edge — main.js
+   keeps --plot-mb / --plot-mr in step with the margins the plot reserves
+   for its labels — so the pills stay inside the frame in every layout
+   instead of landing on the frequency axis. */
 #peak-tools {
   position: absolute;
-  right: 18px;
-  bottom: 46px;
+  right: calc(var(--plot-mr, 14px) + 10px);
+  bottom: calc(var(--plot-mb, 40px) + 12px);
   z-index: 6;
   display: flex;
   gap: 6px;
@@ -196,6 +201,13 @@ body.running #brand-name::after {
    (desktop pickers; phone pickers ignore option styling, so the Auto entry
    also names the value) */
 #sel-cwtbpo option.rec { font-weight: 700; }
+
+/* Averages: the picker, how long that many takes, and Restart. More than
+   one line of the rail holds, so the button drops below rather than the
+   picker shrinking until its value is out of sight. */
+#row-linN { flex-wrap: wrap; row-gap: 0.35rem; }
+#row-linN select { min-width: 4.4rem; }
+#row-linN #btn-avg-restart { margin-left: auto; }
 
 /* readouts that sit beside a control in the settings (Δf, sample rate) */
 .ctl { display: inline-flex; align-items: center; gap: 0.5rem; min-width: 0; }
@@ -528,11 +540,7 @@ body.fullview #app {
     right: calc(10px + env(safe-area-inset-right));
   }
 
-  #peak-tools {
-    right: calc(12px + env(safe-area-inset-right));
-    bottom: calc(34px + env(safe-area-inset-bottom));
-  }
-  .tool { padding: 0.55rem 0.8rem; font-size: 0.78rem; border-radius: 18px; }
+  .tool { padding: 0.5rem 0.75rem; font-size: 0.78rem; border-radius: 18px; }
 
   body.fullview #topbar { display: none; }
 
@@ -613,5 +621,4 @@ body.fullview #app {
   }
   #btn-full,
   body.fullview #btn-full { right: calc(10px + max(env(safe-area-inset-right), 44px)); }
-  #peak-tools { right: calc(12px + max(env(safe-area-inset-right), 44px)); }
 }

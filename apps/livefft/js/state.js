@@ -60,6 +60,34 @@ export const DEFAULTS = {
 };
 
 /**
+ * How long a linear (Welch) measurement takes: the data N averages consume
+ * before the trace freezes and waits for a restart.
+ *
+ * Frames overlap by half a window, and ones that come closer than that
+ * count fractionally, so N averages always cost N half-windows of new data
+ * whatever cadence the display manages:
+ *
+ *   T = N · N_fft / (2 fs)
+ *
+ * In multi-res each region has its own window — 4^k longer than the base —
+ * so the low end takes 4^k times as long, and the measurement is finished
+ * only when the slowest region is.
+ *
+ * @param {State} state
+ * @param {number} sampleRate
+ * @returns {{fast: number, slow: number}} seconds for the base region (the
+ *   whole trace, in fixed-resolution mode) and for the slowest one
+ */
+export function linearAverageTime(state, sampleRate = 48000) {
+  const target = state.get('linearTarget');
+  const multires = state.get('resMode') === 'multires';
+  // multi-res builds its stages from a base capped at 8192 (see SpectrumView)
+  const base = multires ? Math.min(state.get('fftSize'), 8192) : state.get('fftSize');
+  const span = (size) => (target * size) / (2 * sampleRate);
+  return { fast: span(base), slow: span(multires ? base * 16 : base) };
+}
+
+/**
  * Resolve the frequency-axis scale. 'auto' matches the analysis: log for
  * the wavelet spectrogram and multi-res spectrum (their resolution is
  * frequency-proportional), linear for STFT and fixed-resolution FFT.

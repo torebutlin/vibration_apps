@@ -339,7 +339,7 @@ export class SpectrumView {
       }
     }
 
-    legend.push({ color: th.traceMain, label: s.get('avgMode') === 'off' ? 'live' : 'average' });
+    legend.push({ color: th.traceMain, label: this.#mainTraceLabel() });
     if (showGhost) legend.push({ color: th.traceGhost, label: 'live' });
     if (peakHoldActive) legend.push({ color: th.tracePeak, label: 'peak hold' });
 
@@ -390,6 +390,17 @@ export class SpectrumView {
     if (hover && this.axes.inRect(hover.x, hover.y)) {
       this.#drawCrosshair(ctx, hover, segments, dB, th);
     }
+  }
+
+  /** What the bold trace is. A finished linear measurement is frozen, and
+   *  a frozen trace is indistinguishable from a stalled one, so the plot
+   *  says so — the count readout beside it is hidden on phones. */
+  #mainTraceLabel() {
+    const mode = this.state.get('avgMode');
+    if (mode === 'off') return 'live';
+    if (mode !== 'linear') return 'average';
+    const p = this.avgProgress;
+    return p.done ? `average ${p.target}/${p.target} · frozen` : `average ${p.count}/${p.target}`;
   }
 
   /** One tick of the auto-range clock, shared by both ends of the axis:

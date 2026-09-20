@@ -8,6 +8,7 @@ import {
   recommendedBinsPerOctave,
   effectiveBinsPerOctave,
   freqRange,
+  linearAverageTime,
 } from '../apps/livefft/js/state.js';
 
 /** A state stub: the defaults with a patch applied. */
@@ -133,4 +134,41 @@ test('a range left above the current Nyquist stays usable', () => {
   const fr = freqRange(fakeState({ freqMin: 12000, freqMax: 20000 }), 'spectrogram', 16000);
   assert.ok(fr.min < fr.max, `${fr.min} < ${fr.max}`);
   assert.equal(fr.max, 8000);
+});
+
+test('a linear measurement costs N half-windows of data', () => {
+  const fs = 48000;
+  // 16 averages of a 4096-point FFT at 50% overlap: 16 x 2048 samples
+  const { fast, slow } = linearAverageTime(
+    fakeState({ fftSize: 4096, linearTarget: 16, resMode: 'standard' }),
+    fs
+  );
+  assert.equal(slow, fast);
+  assert.ok(Math.abs(fast - 32768 / fs) < 1e-9, `${fast}`);
+  // twice the averages, twice the time; twice the FFT, twice the time
+  const twice = linearAverageTime(fakeState({ fftSize: 4096, linearTarget: 32 }), fs).fast;
+  const longer = linearAverageTime(fakeState({ fftSize: 8192, linearTarget: 16 }), fs).fast;
+  assert.ok(Math.abs(twice - 2 * fast) < 1e-9, `${twice}`);
+  assert.ok(Math.abs(longer - 2 * fast) < 1e-9, `${longer}`);
+  // and it is proportional to the record length, not the sample rate
+  assert.ok(Math.abs(linearAverageTime(fakeState({ fftSize: 4096, linearTarget: 16 }), fs / 2).fast - 2 * fast) < 1e-9);
+});
+
+test('multi-res reports both ends: the low region gathers 16x slower', () => {
+  const fs = 48000;
+  const { fast, slow } = linearAverageTime(
+    fakeState({ fftSize: 4096, linearTarget: 16, resMode: 'multires' }),
+    fs
+  );
+  assert.ok(Math.abs(fast - 32768 / fs) < 1e-9, `${fast}`);
+  // the lowest region's window is 16x longer, so it needs 16x the data
+  assert.ok(Math.abs(slow - 16 * fast) < 1e-9, `${slow}`);
+  assert.ok(slow > 10 && slow < 11, `${slow} s`);
+});
+
+test('multi-res builds its stages from a base capped at 8192', () => {
+  const fs = 48000;
+  const at16k = linearAverageTime(fakeState({ fftSize: 16384, linearTarget: 16, resMode: 'multires' }), fs);
+  const at8k = linearAverageTime(fakeState({ fftSize: 8192, linearTarget: 16, resMode: 'multires' }), fs);
+  assert.deepEqual(at16k, at8k);
 });

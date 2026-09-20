@@ -2,7 +2,8 @@
 
 import { AudioEngine } from '../../../shared/js/audio/engine.js';
 import { PlotInteraction } from '../../../shared/js/plot/interaction.js';
-import { State, effectiveFreqScale } from './state.js';
+import { plotLayout } from '../../../shared/js/plot/axes.js';
+import { State, effectiveFreqScale, linearAverageTime } from './state.js';
 import { SpectrumView } from './views/spectrum.js';
 import { SpectrogramView } from './views/spectrogram.js';
 import { ScopeView } from './views/scope.js';
@@ -36,8 +37,8 @@ const mqNarrow = window.matchMedia('(max-width: 860px)');
 const mqPortrait = window.matchMedia('(orientation: portrait)');
 const layout = { compact: false, yInside: false, padTop: 0, padBottom: 0 };
 
-// safe-area insets, exposed by app.css as --sat / --sab so the canvas can
-// keep its axes clear of the notch and the home indicator
+// safe-area inset, exposed by app.css as --sat so the canvas can keep its
+// axes clear of the notch
 function safeInset(name) {
   return parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name)) || 0;
 }
@@ -51,7 +52,22 @@ function applyLayout() {
   // takes the whole screen (inside the safe areas)
   const pills = document.body.classList.contains('fullview') ? 0 : 60;
   layout.padTop = layout.compact ? pills + safeInset('--sat') : 0;
-  layout.padBottom = layout.compact ? safeInset('--sab') : 0;
+  // Nothing to reserve at the bottom: on narrow screens #stage pads the
+  // canvas clear of the home indicator already, so counting the inset here
+  // too would lift the frequency axis a second time — and leave the plot's
+  // own chrome, which is placed against the screen, sitting below it.
+  layout.padBottom = 0;
+  syncPlotFrame();
+}
+
+// The controls that float inside the plot (peak hold and its reset) are
+// placed against the axis frame rather than the canvas edge, so they stay
+// inside it whatever the layout reserves for labels and safe areas.
+function syncPlotFrame() {
+  const { m } = plotLayout(cssW, cssH, layout);
+  const root = document.documentElement.style;
+  root.setProperty('--plot-mb', `${m.b}px`);
+  root.setProperty('--plot-mr', `${m.r}px`);
 }
 
 // The app is one screenful: it fills the viewport and never scrolls. CSS
@@ -471,6 +487,7 @@ const roAvg = document.getElementById('ro-avg');
 const roAvgWrap = document.getElementById('ro-avg-wrap');
 const roFs2 = document.getElementById('ro-fs2');
 const roRes2 = document.getElementById('ro-res2');
+const roAvgTime = document.getElementById('ro-avgtime');
 const roCwtRange = document.getElementById('ro-cwtrange');
 let lastReadout = 0;
 
@@ -478,14 +495,29 @@ function fmtRes(binHz) {
   return `${binHz.toFixed(binHz < 10 ? 2 : 1)} Hz`;
 }
 
+function fmtSeconds(t) {
+  if (t < 1) return `${(t * 1000).toFixed(0)} ms`;
+  return t < 10 ? `${t.toFixed(1)} s` : `${t.toFixed(0)} s`;
+}
+
 function updateReadouts(now) {
   if (now - lastReadout < 250) return;
   lastReadout = now;
   const view = state.get('view');
   roFs.textContent = started ? engine.sampleRate : '—';
-  // beside the settings: sample rate next to Input, Δf next to FFT size
+  // beside the settings: the rate the device gave us under Source, Δf next
+  // to the FFT size that sets it
   roFs2.textContent = started ? `${(engine.sampleRate / 1000).toFixed(1)} kHz` : '—';
   roRes2.textContent = `Δf ${fmtRes(engine.sampleRate / state.get('fftSize'))}`;
+  // how long the chosen number of linear averages takes to gather — in
+  // multi-res the low region needs 16x longer than the top, so both ends
+  // of that are worth showing
+  if (roAvgTime) {
+    const t = linearAverageTime(state, engine.sampleRate);
+    roAvgTime.textContent = t.slow > t.fast * 1.05
+      ? `${fmtSeconds(t.fast)} – ${fmtSeconds(t.slow)}`
+      : fmtSeconds(t.fast);
+  }
   if (view === 'spectrum') {
     roRes.textContent = views.spectrum.resolutionText;
     const p = views.spectrum.dominantPeak;

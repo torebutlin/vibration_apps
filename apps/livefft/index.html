@@ -56,6 +56,13 @@
             </div>
           </div>
         </div>
+        <!-- inside the plot box, so the pills follow the canvas rather than
+             the screen: #stage is padded clear of the safe areas on phones
+             and the two differ by that much -->
+        <div id="peak-tools" data-views="spectrum">
+          <button class="tool" id="btn-peakhold" data-tip="Keeps the maximum of the displayed trace since the last reset — shown as the amber trace. With averaging on it holds the averaged level; switch averaging off to catch short transients." title="Peak hold">Hold</button>
+          <button class="tool" id="btn-peakreset" title="Reset the held peaks" hidden>Reset</button>
+        </div>
       </div>
       <div id="hud">
         <span class="readout">fs <b id="ro-fs">—</b><span class="unit"> Hz</span></span>
@@ -64,10 +71,6 @@
         <span class="readout" id="ro-peak-wrap">peak <b id="ro-peak">—</b></span>
       </div>
       <button class="btn ghost icon" id="btn-full" aria-label="Full screen" title="Full screen — hide all controls">⤢</button>
-      <div id="peak-tools" data-views="spectrum">
-        <button class="tool" id="btn-peakhold" data-tip="Keeps the maximum of the displayed trace since the last reset — shown as the amber trace. With averaging on it holds the averaged level; switch averaging off to catch short transients." title="Peak hold">Hold</button>
-        <button class="tool" id="btn-peakreset" title="Reset the held peaks" hidden>Reset</button>
-      </div>
     </main>
 
     <div id="scrim" hidden></div>
@@ -88,10 +91,11 @@
         <h3 class="group-title">Source</h3>
         <div class="row">
           <label for="sel-source" data-tip="A microphone (audio processing disabled for measurement), or a built-in demo signal — demos need no mic permission.">Input</label>
-          <span class="ctl">
-            <select id="sel-source"></select>
-            <span class="readout aside" id="ro-fs2" title="Sample rate">—</span>
-          </span>
+          <select id="sel-source"></select>
+        </div>
+        <div class="row">
+          <label data-tip="The rate the device captures at, chosen by the browser and the hardware — not a setting. It fixes the highest frequency the analysis can reach (fs/2) and, with the FFT size, the resolution Δf = fs / N.">Sample rate</label>
+          <span class="readout aside" id="ro-fs2">—</span>
         </div>
         <div class="row" id="row-monitor" hidden>
           <label for="rng-monitor" data-tip="Play the demo signal through the speakers.">Listen</label>
@@ -152,11 +156,14 @@
           <span class="readout" id="ro-tau" style="min-width: 3.6rem; text-align: right;">0.5 s</span>
         </div>
         <div class="row" id="row-linN" hidden>
-          <label for="sel-linN" data-tip="Number of independent spectra averaged before the display freezes. Restart begins a fresh measurement.">Averages</label>
-          <select id="sel-linN">
-            <option>4</option><option>8</option><option>16</option>
-            <option>32</option><option>64</option><option>128</option>
-          </select>
+          <label for="sel-linN" data-tip="Number of independent spectra averaged before the display freezes — the time beside it is how long that takes to gather. In multi-res the two figures are the top region and the lowest, whose windows are 16x longer. Restart begins a fresh measurement.">Averages</label>
+          <span class="ctl">
+            <select id="sel-linN">
+              <option>4</option><option>8</option><option>16</option>
+              <option>32</option><option>64</option><option>128</option>
+            </select>
+            <span class="readout aside" id="ro-avgtime" title="Time to gather this many averages">—</span>
+          </span>
           <button class="btn small" id="btn-avg-restart">Restart</button>
         </div>
       </div>

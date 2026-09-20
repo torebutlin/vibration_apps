@@ -381,10 +381,11 @@ export function initUI(state, engine, callbacks) {
       ['Readout', 'Move the pointer (or touch) over the plot for a frequency and level readout at the crosshair.'],
       ['Run / pause', 'The Start button, or the space bar. Pausing freezes the display for discussion. After the app has been in the background, Resume rebuilds the audio input if the phone shut it down.'],
       ['Peak hold', 'Hold (bottom right of the spectrum) keeps the maximum of the displayed trace since the last Reset, shown as the amber trace. With averaging on it holds the averaged level; switch averaging off to catch short transients.'],
+      ['Averaging', 'Exp is a running average that always follows the signal, with the time constant you set. Linear gathers a fixed number of independent spectra and then freezes — a Welch measurement, and the trace says so once it is complete. The time beside Averages is how long that takes (N half-windows of data, N·N_fft/2fs), and Restart begins a fresh one; nothing else will.'],
       ['Full screen', 'The ⤢ button at the top right of the plot hides every control for a clean projected display; ✕ (or Esc) brings them back. On a phone, tapping the plot also brings them back.'],
       ['Levels', 'The spectrum is a density (dBFS per Hz), the spectrogram is amplitude (dBFS). The same tone therefore reads lower on the spectrum — about 15 dB lower at FFT 4096 — and the gap changes with FFT size and window.'],
       ['Analysis edge', 'In the wavelet spectrogram the dashed curve at the right is how far each frequency has been analysed. A wavelet needs about four of its own widths of signal after the instant it reports on, and that width grows as the frequency falls, so the top of the plot is live and the bottom trails — by 0.8 s at 20 Hz on High Q. The curve is the time–frequency uncertainty principle drawn to scale. Wavelet Q → Ear follows the bandwidth of hearing instead and is live almost all the way down.'],
-      ['Settings', 'On a phone, ☰ opens the settings sheet; drag it down, tap outside it or press Escape to close. Δf sits beside the FFT size, the sample rate beside the input.'],
+      ['Settings', 'On a phone, ☰ opens the settings sheet; drag it down, tap outside it or press Escape to close. Δf sits beside the FFT size, and the sample rate the device gave us is under Source.'],
     ]);
 
     for (const group of document.querySelectorAll('#panel .group')) {
