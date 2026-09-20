@@ -100,17 +100,73 @@ test('PSD level of white noise is flat at 2*sigma^2/fs', () => {
   assert.ok(Math.abs(meanLevel - expected) / expected < 0.05, `mean ${meanLevel}, want ${expected}`);
 });
 
-test('linear averaging reduces variance and freezes at target', () => {
+test('linear averaging fills its window and then moves it along', () => {
   const fs = 10000;
   const n = 1024;
   const proc = new SpectrumProcessor({ fftSize: n, windowName: 'hann', sampleRate: fs });
   proc.setAveraging('linear', { linearTarget: 10 });
-  for (let seg = 0; seg < 10; seg++) proc.process(makeNoise(n, 0.1, seg * 31 + 7), 0.01);
+  const frames = [];
+  for (let seg = 0; seg < 10; seg++) {
+    frames.push(makeNoise(n, 0.1, seg * 31 + 7));
+    proc.process(frames[seg], 0.01);
+  }
   assert.equal(proc.avgCount, 10);
-  assert.ok(proc.linearDone);
+  assert.ok(proc.linearFull);
   const before = Float64Array.from(proc.avgPower);
+  // an eleventh frame pushes the first one out: the window still spans 10,
+  // but it is a different 10, so the trace has to have moved
   proc.process(makeNoise(n, 0.1, 12345), 0.01);
-  assert.deepEqual(Array.from(proc.avgPower), Array.from(before), 'frozen after target');
+  assert.equal(proc.avgCount, 10);
+  let moved = 0;
+  for (let k = 0; k < proc.nBins; k++) if (proc.avgPower[k] !== before[k]) moved++;
+  assert.ok(moved > proc.nBins * 0.9, `${moved} of ${proc.nBins} bins moved`);
+});
+
+test('the moving window is the mean of exactly the last N frames', () => {
+  const fs = 10000;
+  const n = 256;
+  const target = 4;
+  const proc = new SpectrumProcessor({ fftSize: n, windowName: 'hann', sampleRate: fs });
+  proc.setAveraging('linear', { linearTarget: target });
+  // a reference processor fed only the frames that should still be in the
+  // window, averaged the plain way
+  const ref = new SpectrumProcessor({ fftSize: n, windowName: 'hann', sampleRate: fs });
+  const frames = [];
+  for (let seg = 0; seg < 11; seg++) frames.push(makeNoise(n, 0.1, seg * 101 + 3));
+  for (const f of frames) proc.process(f, 0.01);
+  const want = new Float64Array(proc.nBins);
+  for (const f of frames.slice(-target)) {
+    ref.setAveraging('off');
+    ref.process(f, 0.01);
+    for (let k = 0; k < want.length; k++) want[k] += ref.power[k] / target;
+  }
+  for (let k = 0; k < want.length; k++) {
+    assert.ok(Math.abs(proc.avgPower[k] - want[k]) < 1e-6 * (1 + want[k]), `bin ${k}`);
+  }
+});
+
+test('the window spans N frames however often frames arrive', () => {
+  const fs = 10000;
+  const n = 256;
+  // quarter-window hops: four frames of weight 0.25 make one independent
+  // average, so a window of 4 holds the last 16 of them
+  const fast = new SpectrumProcessor({ fftSize: n, windowName: 'hann', sampleRate: fs });
+  const slow = new SpectrumProcessor({ fftSize: n, windowName: 'hann', sampleRate: fs });
+  fast.setAveraging('linear', { linearTarget: 4 });
+  slow.setAveraging('linear', { linearTarget: 4 });
+  for (let seg = 0; seg < 24; seg++) {
+    const f = makeNoise(n, 0.1, seg * 977 + 11);
+    slow.process(f, 0.01, 1);
+    for (let i = 0; i < 4; i++) fast.process(f, 0.0025, 0.25);
+  }
+  assert.equal(fast.avgCount, 4);
+  assert.equal(slow.avgCount, 4);
+  for (let k = 0; k < fast.nBins; k++) {
+    assert.ok(
+      Math.abs(fast.avgPower[k] - slow.avgPower[k]) < 1e-6 * (1 + slow.avgPower[k]),
+      `bin ${k}: ${fast.avgPower[k]} vs ${slow.avgPower[k]}`
+    );
+  }
 });
 
 test('exponential averaging converges toward steady level', () => {
@@ -179,10 +235,13 @@ test('linear averaging counts fractional frames when hops overlap more than 50%'
   // weight 0.5 = frames hop by a quarter of the FFT, so two frames make one independent average
   for (let seg = 0; seg < 7; seg++) proc.process(makeNoise(n, 0.1, seg * 31 + 7), 0.01, 0.5);
   assert.equal(proc.avgCount, 3.5);
-  assert.ok(!proc.linearDone, 'not done after 3.5 effective averages');
+  assert.ok(!proc.linearFull, 'the window is not full after 3.5 averages');
   proc.process(makeNoise(n, 0.1, 999), 0.01, 0.5);
   assert.equal(proc.avgCount, 4);
-  assert.ok(proc.linearDone, 'done at the target');
+  assert.ok(proc.linearFull, 'full at the target');
+  // and it stays full, at the target, however many more frames arrive
+  for (let seg = 0; seg < 20; seg++) proc.process(makeNoise(n, 0.1, seg * 13 + 1), 0.01, 0.5);
+  assert.equal(proc.avgCount, 4);
 });
 
 test('weighted linear average equals the plain mean when every weight is equal', () => {
@@ -197,5 +256,12 @@ test('weighted linear average equals the plain mean when every weight is equal',
     a.process(x, 0.01, 1);
     b.process(x, 0.01, 0.25);
   }
-  for (let k = 0; k < a.nBins; k++) assert.ok(Math.abs(a.avgPower[k] - b.avgPower[k]) < 1e-9 * (1 + a.avgPower[k]));
+  // the window banks its frames as single-precision spectra, so the two
+  // routes agree to about a part in ten million, not to the last bit
+  for (let k = 0; k < a.nBins; k++) {
+    assert.ok(
+      Math.abs(a.avgPower[k] - b.avgPower[k]) < 1e-6 * (1 + a.avgPower[k]),
+      `bin ${k}: ${a.avgPower[k]} vs ${b.avgPower[k]}`
+    );
+  }
 });

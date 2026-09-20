@@ -1,7 +1,9 @@
 // Live spectrum pipeline: windowed FFT -> power spectrum -> averaging.
 //
 // All averaging happens on the one-sided *power* spectrum |X[k]|^2
-// (Welch-style). Display quantities are derived from the averaged power:
+// (Welch-style). Two ways of doing it: exponential, with a time constant,
+// and linear — a uniformly weighted average of the last N independent
+// frames, which slides on every frame rather than stopping at N. Display quantities are derived from the averaged power:
 //
 //   amplitude spectrum (peak) : A[k]   = 2*sqrt(P[k]) / (N*CG)
 //   amplitude spectrum (rms)  : Arms   = A / sqrt(2)
@@ -14,6 +16,7 @@
 
 import { rfftMagSq } from './fft.js';
 import { getWindow } from './windows.js';
+import { RollingPowerAverage } from './rolling.js';
 
 export const AVG_MODES = ['off', 'exponential', 'linear'];
 
@@ -22,7 +25,7 @@ export class SpectrumProcessor {
     this.sampleRate = sampleRate;
     this.avgMode = 'exponential';
     this.expTimeConst = 0.5;    // seconds
-    this.linearTarget = 16;     // frames; freeze when reached
+    this.linearTarget = 16;     // independent frames in the moving window
     this.configure(fftSize, windowName);
   }
 
@@ -39,6 +42,7 @@ export class SpectrumProcessor {
     this.power = new Float64Array(nBins);      // instantaneous
     this.avgPower = new Float64Array(nBins);   // averaged
     this.peakPower = new Float64Array(nBins);  // peak hold
+    this.#configureRolling();
     this.resetAverage();
     this.resetPeakHold();
   }
@@ -48,13 +52,27 @@ export class SpectrumProcessor {
     this.avgMode = mode;
     if (expTimeConst !== undefined) this.expTimeConst = expTimeConst;
     if (linearTarget !== undefined) this.linearTarget = linearTarget;
+    this.#configureRolling();
     this.resetAverage();
+  }
+
+  /** The moving window is only built while it is the mode in use: it costs
+   *  a spectrum per frame it spans. */
+  #configureRolling() {
+    this.rolling = this.avgMode === 'linear'
+      ? new RollingPowerAverage(this.nBins, this.linearTarget)
+      : null;
   }
 
   resetAverage() {
     this.avgPower.fill(0);
     this.avgCount = 0;
-    this.linearDone = false;
+    this.rolling?.reset();
+  }
+
+  /** True once the moving window spans the full number of averages. */
+  get linearFull() {
+    return this.rolling ? this.rolling.full : false;
   }
 
   resetPeakHold() {
@@ -72,8 +90,8 @@ export class SpectrumProcessor {
    * @param {number} dt seconds since previous frame (for exponential averaging)
    * @param {number} weight how much of an independent frame this is:
    *   1 for frames hopping by half the FFT (50% overlap), hop/(N/2) when
-   *   frames come more often than that. Linear averaging counts weights,
-   *   so "N averages" always means N independent estimates.
+   *   frames come more often than that. Linear averaging weights its window
+   *   by it, so "N averages" always means N independent estimates.
    */
   process(samples, dt, weight = 1) {
     const n = this.fftSize;
@@ -99,13 +117,10 @@ export class SpectrumProcessor {
         break;
       }
       case 'linear': {
-        if (!this.linearDone) {
-          const c = this.avgCount;
-          const w = weight;
-          for (let k = 0; k < nb; k++) avg[k] = (avg[k] * c + p[k] * w) / (c + w);
-          this.avgCount = c + w;
-          if (this.avgCount >= this.linearTarget - 1e-9) this.linearDone = true;
-        }
+        // a boxcar over the last N independent frames, moved on by this one
+        this.rolling.add(p, weight);
+        this.rolling.writeTo(avg);
+        this.avgCount = this.rolling.frames;
         break;
       }
     }

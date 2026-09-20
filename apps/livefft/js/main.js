@@ -509,9 +509,8 @@ function updateReadouts(now) {
   // to the FFT size that sets it
   roFs2.textContent = started ? `${(engine.sampleRate / 1000).toFixed(1)} kHz` : '—';
   roRes2.textContent = `Δf ${fmtRes(engine.sampleRate / state.get('fftSize'))}`;
-  // how long the chosen number of linear averages takes to gather — in
-  // multi-res the low region needs 16x longer than the top, so both ends
-  // of that are worth showing
+  // how far back the moving window reaches — in multi-res the low region's
+  // window is 16x longer than the top's, so both ends are worth showing
   if (roAvgTime) {
     const t = linearAverageTime(state, engine.sampleRate);
     roAvgTime.textContent = t.slow > t.fast * 1.05
@@ -525,7 +524,7 @@ function updateReadouts(now) {
     roPeak.textContent = p ? (p.freq >= 1000 ? `${(p.freq / 1000).toFixed(3)} kHz` : `${p.freq.toFixed(1)} Hz`) : '—';
     const prog = views.spectrum.avgProgress;
     roAvgWrap.hidden = !prog;
-    if (prog) roAvg.textContent = `${prog.count}/${prog.target}${prog.done ? ' ✓' : ''}`;
+    if (prog) roAvg.textContent = prog.done ? `${prog.target}` : `${prog.count}/${prog.target}`;
   } else {
     roPeakWrap.hidden = true;
     roAvgWrap.hidden = true;

@@ -10,8 +10,8 @@
 // so the eye can follow the level across the jump.
 //
 // Each stage has its own window correction, averaging state and peak hold.
-// Averaging modes mirror SpectrumProcessor (off / exponential / linear-N-
-// then-freeze).
+// Averaging modes mirror SpectrumProcessor (off / exponential / a moving
+// average of the last N independent frames).
 //
 // How often a stage is recomputed is a display question, not an averaging
 // one. A stage could wait for half its window of new samples — 50% overlap,
@@ -25,6 +25,7 @@
 
 import { rfftMagSq } from './fft.js';
 import { getWindow } from './windows.js';
+import { RollingPowerAverage } from './rolling.js';
 
 // Longest exponential averaging time any stage will use (seconds). See
 // #stageTau: without a cap the lowest region would average over 8 s at the
@@ -108,11 +109,13 @@ export class MultiResSpectrum {
         avgPower: new Float64Array(nBins),
         peakPower: new Float64Array(nBins),
         avgCount: 0,
+        rolling: null,         // moving window, built only in linear mode
         // Region covered by this stage: (fLow, fHigh]; stage 2 reaches 0
         fHigh: this.sampleRate / 2 / 4 ** k,
         fLow: k === 2 ? 0 : this.sampleRate / 2 / 4 ** (k + 1),
       };
     });
+    this.#configureRolling();
     this.resetAverage();
     this.resetPeakHold();
   }
@@ -121,7 +124,18 @@ export class MultiResSpectrum {
     this.avgMode = mode;
     if (expTimeConst !== undefined) this.expTimeConst = expTimeConst;
     if (linearTarget !== undefined) this.linearTarget = linearTarget;
+    this.#configureRolling();
     this.resetAverage();
+  }
+
+  /** A moving window per stage, built only while it is the mode in use:
+   *  the lowest stage's spectra are the longest and there are N of them. */
+  #configureRolling() {
+    for (const s of this.stages) {
+      s.rolling = this.avgMode === 'linear'
+        ? new RollingPowerAverage(s.nBins, this.linearTarget)
+        : null;
+    }
   }
 
   resetAverage() {
@@ -130,6 +144,7 @@ export class MultiResSpectrum {
       s.avgCount = 0;
       s.pendingWeight = 0;
       s.pendingDt = 0;
+      s.rolling?.reset();
     }
   }
 
@@ -153,11 +168,16 @@ export class MultiResSpectrum {
     return Math.min(this.expTimeConst * 4 ** k, MAX_STAGE_TAU);
   }
 
-  /** Progress of the slowest stage (linear mode): {count, target, done}. */
+  /** How full the slowest stage's window is (linear mode): {count, target,
+   *  done} — done once every region spans its full number of averages. */
   get linearProgress() {
     let count = Infinity;
-    for (const s of this.stages) count = Math.min(count, s.avgCount);
-    return { count, target: this.linearTarget, done: count >= this.linearTarget - 1e-9 };
+    let done = true;
+    for (const s of this.stages) {
+      count = Math.min(count, s.avgCount);
+      if (!s.rolling?.full) done = false;
+    }
+    return { count, target: this.linearTarget, done };
   }
 
   /** Longest window length needed from the ring buffer. */
@@ -185,14 +205,11 @@ export class MultiResSpectrum {
       s.pendingDt += dt;
       if (s.frame % s.cadence !== 0 && s.avgCount > 0) continue;
       const startedAt = performance.now();
-      const linearDone = this.avgMode === 'linear' && s.avgCount >= this.linearTarget - 1e-9;
-      // instantaneous spectrum always (drives the live ghost trace);
-      // only the average freezes when a linear measurement completes
       const n = s.size;
       const offset = samples.length - n;
       for (let i = 0; i < n; i++) s.windowed[i] = samples[offset + i] * s.w[i];
       rfftMagSq(s.windowed, s.power);
-      if (!linearDone) {
+      {
         const { power, avgPower, nBins } = s;
         switch (this.avgMode) {
           case 'off':
@@ -200,11 +217,10 @@ export class MultiResSpectrum {
             s.avgCount = 1;
             break;
           case 'linear': {
-            const c = s.avgCount;
             // the new data since this stage last ran, in its own frames
-            const w = s.pendingWeight / 4 ** k;
-            for (let b = 0; b < nBins; b++) avgPower[b] = (avgPower[b] * c + power[b] * w) / (c + w);
-            s.avgCount = c + w;
+            s.rolling.add(power, s.pendingWeight / 4 ** k);
+            s.rolling.writeTo(avgPower);
+            s.avgCount = s.rolling.frames;
             break;
           }
           default: {

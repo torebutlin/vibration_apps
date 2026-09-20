@@ -148,7 +148,7 @@ export class SpectrumView {
     if (this.state.get('avgMode') !== 'linear') return null;
     const p = this.state.get('resMode') === 'multires'
       ? this.multi.linearProgress
-      : { count: this.proc.avgCount, target: this.proc.linearTarget, done: this.proc.linearDone };
+      : { count: this.proc.avgCount, target: this.proc.linearTarget, done: this.proc.linearFull };
     // counts are fractional (independent-frame weights); show whole averages
     return { count: Math.floor(p.count + 1e-9), target: p.target, done: p.done };
   }
@@ -392,15 +392,15 @@ export class SpectrumView {
     }
   }
 
-  /** What the bold trace is. A finished linear measurement is frozen, and
-   *  a frozen trace is indistinguishable from a stalled one, so the plot
-   *  says so — the count readout beside it is hidden on phones. */
+  /** What the bold trace is: how many spectra the moving window is
+   *  averaging, and while it is still filling, how far along it is. The
+   *  readout that says the same is hidden on phones. */
   #mainTraceLabel() {
     const mode = this.state.get('avgMode');
     if (mode === 'off') return 'live';
     if (mode !== 'linear') return 'average';
     const p = this.avgProgress;
-    return p.done ? `average ${p.target}/${p.target} · frozen` : `average ${p.count}/${p.target}`;
+    return p.done ? `average · ${p.target}` : `average · ${p.count}/${p.target}`;
   }
 
   /** One tick of the auto-range clock, shared by both ends of the axis:

@@ -72,20 +72,26 @@ test('multires PSD is continuous across boundaries for white noise', () => {
   }
 });
 
-test('multires linear averaging freezes every stage at the target', () => {
+test('multires linear averaging fills every stage, then keeps moving', () => {
   const fs = 48000;
   const mr = new MultiResSpectrum({ baseSize: 1024, windowName: 'hann', sampleRate: fs });
   mr.setAveraging('linear', { linearTarget: 5 });
   const n = mr.maxSize;
   // stage 2 runs every 4 frames and each of its frames counts 1/4 of an
   // independent average, so 5 averages need 5*4/0.25 = 80 frames
-  for (let f = 0; f < 80; f++) mr.process(makeNoise(n, 0.1, 3 + f * 31), 0.05);
+  for (let f = 0; f < 79; f++) mr.process(makeNoise(n, 0.1, 3 + f * 31), 0.05);
+  assert.ok(!mr.linearProgress.done, 'the slowest stage is still filling');
+  mr.process(makeNoise(n, 0.1, 7919), 0.05);
   const prog = mr.linearProgress;
   assert.ok(prog.done, `progress ${prog.count}/${prog.target}`);
+  assert.ok(Math.abs(prog.count - 5) < 1e-9, `count ${prog.count}`);
+  // the windows stay the same length and keep following the signal
   const before = mr.stages.map((s) => Float64Array.from(s.avgPower));
   for (let f = 0; f < 8; f++) mr.process(makeNoise(n, 0.1, 999 + f * 17), 0.05);
+  assert.ok(Math.abs(mr.linearProgress.count - 5) < 1e-9);
   mr.stages.forEach((s, k) => {
-    assert.deepEqual(Array.from(s.avgPower), Array.from(before[k]), `stage ${k} frozen`);
+    const moved = [...s.avgPower].filter((v, i) => v !== before[k][i]).length;
+    assert.ok(moved > s.nBins * 0.9, `stage ${k}: ${moved} of ${s.nBins} bins moved`);
   });
 });
 
@@ -143,7 +149,7 @@ test('multires linear averaging weights slower stages by their longer windows', 
   const make = (budget) => {
     const mr = new MultiResSpectrum({ baseSize: 1024, windowName: 'hann', sampleRate: fs });
     mr.cadenceBudget = budget;                       // Infinity: every frame; 0: 2^k
-    mr.setAveraging('linear', { linearTarget: 1000 }); // no freeze inside the test
+    mr.setAveraging('linear', { linearTarget: 1000 }); // no eviction inside the test
     return mr;
   };
   const fast = make(Infinity);
@@ -163,7 +169,7 @@ test('multires linear averaging weights slower stages by their longer windows', 
   }
 });
 
-test('multires linear averaging freezes on data seen, at any cadence', () => {
+test('multires linear averaging fills on data seen, at any cadence', () => {
   const fs = 48000;
   const mr = new MultiResSpectrum({ baseSize: 1024, windowName: 'hann', sampleRate: fs });
   mr.cadenceBudget = Infinity;
@@ -173,7 +179,7 @@ test('multires linear averaging freezes on data seen, at any cadence', () => {
   assert.equal(mr.stages[2].avgCount, 1, 'the slowest stage is halfway there');
   assert.ok(!mr.linearProgress.done);
   for (let f = 16; f < 32; f++) mr.process(makeNoise(n, 0.1, 3 + f * 31), 0.05, 1);
-  assert.equal(mr.stages[2].avgCount, 2, 'and stops exactly on the target');
+  assert.equal(mr.stages[2].avgCount, 2, 'and fills exactly on the target');
   assert.ok(mr.linearProgress.done);
 });
 

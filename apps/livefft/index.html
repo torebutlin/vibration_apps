@@ -140,7 +140,7 @@
       <div class="group" data-views="spectrum" data-tab="Analysis">
         <h3 class="group-title">Averaging</h3>
         <div class="row">
-          <label data-tip="Off: live FFT — each frame is one instantaneous spectrum. Exp: running average with a time constant. Linear: average N spectra then freeze — a Welch PSD measurement. The display updates every 21 ms; frames closer than half an FFT count fractionally, so N averages are N independent ones — in multi-res too, where the lower regions need proportionally longer to gather them.">Mode</label>
+          <label data-tip="Off: live FFT — each frame is one instantaneous spectrum. Exp: running average with a time constant, so old data fades out rather than ever leaving. Linear: a moving average of the last N independent spectra, weighted equally and dropping out of the window as they age — a Welch estimate that keeps following the signal. Both update every 21 ms; frames closer than half an FFT count fractionally, so N averages are N independent ones — in multi-res too, where the lower regions take proportionally longer to fill their window.">Mode</label>
           <nav class="seg">
             <input type="radio" name="avgmode" value="off" id="avg-off">
             <label for="avg-off">Off</label>
@@ -156,15 +156,15 @@
           <span class="readout" id="ro-tau" style="min-width: 3.6rem; text-align: right;">0.5 s</span>
         </div>
         <div class="row" id="row-linN" hidden>
-          <label for="sel-linN" data-tip="Number of independent spectra averaged before the display freezes — the time beside it is how long that takes to gather. In multi-res the two figures are the top region and the lowest, whose windows are 16x longer. Restart begins a fresh measurement.">Averages</label>
+          <label for="sel-linN" data-tip="Number of independent spectra in the moving window — the time beside it is how far back that reaches. More averages give a smoother trace that follows the signal more slowly; the grey live trace always responds at once. In multi-res the two figures are the top region and the lowest, whose windows are 16x longer. Clear empties the window, so a transient that has just gone through it leaves immediately.">Averages</label>
           <span class="ctl">
             <select id="sel-linN">
               <option>4</option><option>8</option><option>16</option>
               <option>32</option><option>64</option><option>128</option>
             </select>
-            <span class="readout aside" id="ro-avgtime" title="Time to gather this many averages">—</span>
+            <span class="readout aside" id="ro-avgtime" title="How far back the moving window reaches">—</span>
           </span>
-          <button class="btn small" id="btn-avg-restart">Restart</button>
+          <button class="btn small" id="btn-avg-restart" title="Empty the window and fill it again">Clear</button>
         </div>
       </div>
 
